@@ -1,0 +1,19 @@
+{
+  "name": "menejer-ai-plan-service",
+  "version": "1.0.0",
+  "description": "Менежер AI бизнес төслийн санхүүгийн тооцоо, график, Word (.docx) баримт бичиг угсрах HTTP сервис (Make.com-оос дуудах зориулалттай)",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "docx": "^9.0.2",
+    "cors": "^2.8.5"
+  }
+}
