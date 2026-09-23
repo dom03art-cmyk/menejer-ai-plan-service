@@ -35,7 +35,7 @@ async function runPipeline(job, log = console.log) {
   } else {
     doc = await buildDoc({ A, written, fin, charts, pages: null }); // Word "Update Field" гарчиг
   }
-  job.qc = qc({ an, text, heads: doc.heads });
+  job.qc = qc({ an, text, heads: doc.heads, written });
   job.result = { pages: nPages, tables: doc.tables, headings: doc.heads.length, npv: Math.round(an.npv), irr: +(an.irr * 100).toFixed(1), dscr: an.R.dscr.slice(0, 3), usage: { ...usage }, seconds: Math.round((Date.now() - t0) / 1000), missing_info: A.missing_info || [], assumed: A.assumed_fields || [] };
   job.buffer = doc.buffer;
   step("7/7 илгээж байна");
