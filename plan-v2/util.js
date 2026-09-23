@@ -24,8 +24,13 @@ function findPages(docxBuf, heads) {
 }
 
 // ---- qc.js: чанарын автомат шалгалт ----
-function qc({ an, text, heads }) {
+function qc({ an, text, heads, written }) {
   const issues = [];
+  if (written) {
+    const OUTLINE = require("./outline");
+    const empty = OUTLINE.filter(o => o.group !== "static" && o.words && !(o.attach || []).length && !(written[o.id] || []).length).map(o => o.id);
+    if (empty.length) issues.push(`Хоосон хэсэг: ${empty.join(", ")}`);
+  }
   if (!an.balanceOk) issues.push("Балансын тайлан тэнцэхгүй байна");
   if (text) {
     for (const w of ["skill", ".py", "prompt", "JSON", "Claude", "аль хэдийн", "undefined", "NaN", "[object"]) if (text.includes(w)) issues.push(`Текстэд хориотой үг: "${w}"`);
