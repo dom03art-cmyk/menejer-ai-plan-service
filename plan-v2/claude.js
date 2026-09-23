@@ -24,7 +24,10 @@ async function call({ system, user, model = WRITER, maxTokens = 16000, webSearch
       const msg = await getClient().messages.stream(params).finalMessage();
       usage.calls++; usage.input += msg.usage?.input_tokens || 0; usage.output += msg.usage?.output_tokens || 0;
       const text = msg.content.filter(b => b.type === "text").map(b => b.text).join("");
-      if (msg.stop_reason === "max_tokens") console.warn("[claude] max_tokens-д хүрсэн — хариу таслагдсан байж болзошгүй");
+      if (msg.stop_reason === "max_tokens") {
+        if (params.max_tokens >= 48000) { console.warn("[claude] max_tokens — хамгийн их хэмжээнд хүрсэн, байгаагаар нь буцаав"); return text; }
+        params.max_tokens = Math.min(48000, Math.round(params.max_tokens * 1.6)); console.warn(`[claude] max_tokens-д хүрсэн — ${params.max_tokens} токеноор дахин оролдоно`); lastErr = new Error("max_tokens"); continue;
+      }
       return text;
     } catch (e) {
       lastErr = e;
