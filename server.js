@@ -110,6 +110,9 @@ app.post("/debug/parse-text", (req, res) => {
     }
 });
 
+// plan-v2: бүлэг бүрээр бичдэг шинэ төслийн урсгал (POST /jobs/plan, GET /jobs/:id)
+app.use(require("./plan-v2"));
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`menejer-ai-plan-service listening on port ${PORT}`);
