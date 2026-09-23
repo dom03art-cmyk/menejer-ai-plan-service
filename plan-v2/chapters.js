@@ -21,37 +21,50 @@ const STYLE = `Чи олон улсын түвшний бизнес төслий
 {"type":"box","title":"...","text":"..."}
 {"type":"note","text":"Эх сурвалж: ..."}`;
 
-function outlineFor(group) {
-  return OUTLINE.filter(o => o.group === group && (o.words || o.guide))
+function outlineFor(item) {
+  return [item]
     .map(o => `- id "${o.id}" — ${o.t}: доод тал нь ${o.words || 100} үг. ${o.guide || ""}${o.attach ? " [Код оруулах: " + o.attach.join(", ") + "]" : ""}`).join("\n");
 }
 
-async function writeGroup(group, ctx) {
-  const facts = ctx.research ? [...(group === "ch2a" ? ctx.research.macro : []), ...(["ch2b", "ch1", "ch2c", "ch5"].includes(group) ? ctx.research.market : []), ...(group === "ch1" ? ctx.research.macro.slice(0, 10) : [])] : [];
+// Нэг дуудлагад НЭГ хэсэг бичнэ — хариу max_tokens-д хүрч таслагдахаас сэргийлнэ.
+function factsFor(group, ctx) {
+  if (!ctx.research) return [];
+  const r = ctx.research;
+  if (group === "ch2a") return r.macro;
+  if (group === "ch1") return [...r.macro.slice(0, 10), ...r.market];
+  if (["ch2b", "ch2c", "ch3", "ch5"].includes(group)) return r.market;
+  return [];
+}
+
+async function writeSection(item, ctx) {
+  const facts = factsFor(item.group, ctx);
   const user = `ТӨСЛИЙН МЭДЭЭЛЭЛ:\n${JSON.stringify({ company: ctx.A.company, project: ctx.A.project }, null, 1)}
 САНХҮҮГИЙН ТОО (кодоор тооцсон, эндээс иш тат):\n${JSON.stringify(ctx.facts)}
 ${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts) : ""}
 ${ctx.conversation ? "ЗАХИАЛАГЧИЙН ӨГСӨН МЭДЭЭЛЭЛ (яриа):\n" + ctx.conversation.slice(0, 12000) : ""}
 
-БИЧИХ ХЭСГҮҮД:\n${outlineFor(group)}`;
-  const out = await callJSON({ system: STYLE, user, maxTokens: 16000 });
-  const map = {};
-  for (const s of out.sections || []) map[s.id] = s.blocks || [];
-  return map;
+БИЧИХ ХЭСГҮҮД:\n${outlineFor(item)}`;
+  const out = await callJSON({ system: STYLE, user, maxTokens: Number(process.env.PLAN_SECTION_MAX_TOKENS || 24000) });
+  const sec = (out.sections || []).find(s => s.id === item.id) || (out.sections || [])[0];
+  return sec ? sec.blocks || [] : [];
 }
 
-// Бүлгүүдийг хязгаартай зэрэгцээгээр бичнэ (rate limit-ээс сэргийлж)
-async function writeAll(ctx, concurrency = Number(process.env.PLAN_CONCURRENCY || 2), onProgress = () => { }) {
-  const order = ["ch2a", "ch2b", "ch2c", "ch3", "ch4", "ch5", "ch1"]; // хураангуйг хамгийн сүүлд
-  const result = {}; let idx = 0;
+// Хэсгүүдийг хязгаартай зэрэгцээгээр бичнэ; хураангуй (ch1) хамгийн сүүлд
+async function writeAll(ctx, concurrency = Number(process.env.PLAN_CONCURRENCY || 3), onProgress = () => { }) {
+  const items = OUTLINE.filter(o => o.group !== "static" && (o.words || o.guide));
+  const order = [...items.filter(o => o.group !== "ch1"), ...items.filter(o => o.group === "ch1")];
+  const firstCh1 = order.findIndex(o => o.group === "ch1");
+  const result = {}; let idx = 0, done = 0;
   async function worker() {
     while (idx < order.length) {
-      const g = order[idx++];
-      if (g === "ch1") while (Object.keys(result).length < order.length - 1) await new Promise(r => setTimeout(r, 1000));
-      result[g] = await writeGroup(g, ctx); onProgress(g);
+      const i = idx++, item = order[i];
+      if (i >= firstCh1) while (done < firstCh1) await new Promise(r => setTimeout(r, 1000));
+      try { result[item.id] = await writeSection(item, ctx); }
+      catch (e) { console.warn(`[chapters] ${item.id} бичиж чадсангүй: ${e.message}`); result[item.id] = []; }
+      done++; onProgress(`${item.id} (${done}/${order.length})`);
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
-  return Object.assign({}, ...Object.values(result));
+  return result;
 }
-module.exports = { writeAll, writeGroup };
+module.exports = { writeAll, writeSection };
