@@ -2,8 +2,9 @@
 const path = require("path");
 const pdfmake = require("pdfmake");
 const OUTLINE = require("./outline");
-const FD = path.dirname(require.resolve("dejavu-fonts-ttf/package.json")) + "/ttf/";
-pdfmake.setFonts({ DejaVu: { normal: FD + "DejaVuSans.ttf", bold: FD + "DejaVuSans-Bold.ttf", italics: FD + "DejaVuSans-Oblique.ttf", bolditalics: FD + "DejaVuSans-BoldOblique.ttf" } });
+// Times New Roman-той ижил хэмжээст Tinos фонт (кирилл, Ө, Ү, ₮ дэмжинэ)
+const FD = path.dirname(require.resolve("@expo-google-fonts/tinos/package.json")) + "/";
+pdfmake.setFonts({ DejaVu: { normal: FD + "400Regular/Tinos_400Regular.ttf", bold: FD + "700Bold/Tinos_700Bold.ttf", italics: FD + "400Regular_Italic/Tinos_400Regular_Italic.ttf", bolditalics: FD + "700Bold_Italic/Tinos_700Bold_Italic.ttf" } });
 pdfmake.setLocalAccessPolicy(p => p.startsWith(FD));
 pdfmake.setUrlAccessPolicy(() => false);
 const NAVY = "#1B2A4A", GOLD = "#C9A227", GREY = "#595959";
@@ -40,7 +41,29 @@ function blocks(list, ctx) {
     else if (b.type === "box") out.push({ table: { widths: ["*"], body: [[{ stack: [{ text: b.title || "", bold: true, color: NAVY, margin: [0, 0, 0, 4] }, ...String(b.text || "").split("\n").map(t => ({ text: rich(t), alignment: "justify" }))], fillColor: "#F3F0E6", margin: [8, 6, 8, 6] }]] },
       layout: { hLineWidth: () => 0, vLineWidth: (i) => i === 0 ? 3 : 0, vLineColor: GOLD }, margin: [0, 4, 0, 10] });
     else if (b.type === "table" && Array.isArray(b.headers) && b.headers.length) out.push(...table(b, ctx));
-    else if (b.type === "chart") { const c = ctx.charts[b.key]; if (c) out.push({ image: "data:image/png;base64," + c.buf.toString("base64"), width: 400, alignment: "center", margin: [0, 6, 0, 10] }); }
+    else if (b.type === "chart") { const c = ctx.charts[b.key]; if (c) { out.push({ image: "data:image/png;base64," + c.buf.toString("base64"), width: 400, alignment: "center", margin: [0, 6, 0, b.source ? 2 : 10] }); if (b.source) out.push({ text: `Эх сурвалж: ${b.source}`, italics: true, fontSize: 9, color: GREY, alignment: "center", margin: [0, 0, 0, 10] }); } }
+    else if (b.type === "flow") {
+      const steps = (b.steps || []).map(String).filter(Boolean).slice(0, 10); if (!steps.length) continue;
+      const box = (s, i) => ({ stack: [{ text: String(i + 1), bold: true, color: GOLD, alignment: "center" }, { text: s, fontSize: 9.5, alignment: "center" }], fillColor: "#F3F0E6", margin: [3, 4, 3, 4], border: [true, true, true, true] });
+      const per = steps.length <= 5 ? steps.length : Math.ceil(steps.length / 2);
+      const stack = b.title ? [{ text: b.title, bold: true, color: NAVY, fontSize: 10.5, alignment: "center", margin: [0, 8, 0, 4] }] : [];
+      for (let r = 0; r < steps.length; r += per) {
+        if (r) stack.push({ text: "↓", bold: true, color: GOLD, fontSize: 14, alignment: "center" });
+        const row = [], widths = [];
+        steps.slice(r, r + per).forEach((s, j) => { if (j) { row.push({ text: "→", bold: true, color: GOLD, fontSize: 14, alignment: "center", margin: [0, 10, 0, 0], border: [false, false, false, false] }); widths.push(14); } row.push(box(s, r + j)); widths.push("*"); });
+        stack.push({ table: { widths, body: [row] }, layout: { hLineColor: NAVY, vLineColor: NAVY } });
+      }
+      out.push({ stack, unbreakable: true, margin: [0, 0, 0, 10] });
+    }
+    else if (b.type === "org") {
+      const units = (b.units || []).slice(0, 5); if (!units.length) continue;
+      const org = [];
+      if (b.title) org.push({ text: b.title, bold: true, color: NAVY, fontSize: 10.5, alignment: "center", margin: [0, 8, 0, 4] });
+      org.push({ columns: [{ width: "*", text: "" }, { width: 200, table: { widths: ["*"], body: [[{ text: String(b.head || "Гүйцэтгэх захирал").toUpperCase(), bold: true, color: "white", fillColor: NAVY, alignment: "center", margin: [0, 5, 0, 5] }]] }, layout: "noBorders" }, { width: "*", text: "" }] });
+      org.push({ text: "↓", bold: true, color: GOLD, fontSize: 14, alignment: "center" });
+      org.push({ table: { widths: units.map(() => "*"), body: [units.map(u => ({ stack: [{ text: String(u.name || ""), bold: true, color: NAVY, alignment: "center", margin: [0, 0, 0, 3] }, ...(u.roles || []).map(r => ({ text: String(r), fontSize: 9, alignment: "center" }))], fillColor: "#F3F0E6", margin: [3, 5, 3, 5] }))] }, layout: { hLineColor: NAVY, vLineColor: NAVY } });
+      out.push({ stack: org, unbreakable: true, margin: [0, 0, 0, 10] });
+    }
   }
   return out;
 }
@@ -70,7 +93,7 @@ async function buildPdf({ A, written, fin, charts }) {
   }
   const doc = {
     pageSize: "A4", pageMargins: [85, 57, 42, 57], content,
-    defaultStyle: { font: "DejaVu", fontSize: 10.5, lineHeight: 1.2 },
+    defaultStyle: { font: "DejaVu", fontSize: 12, lineHeight: 1.15 },
     styles: { h1: { fontSize: 15, bold: true, color: NAVY, margin: [0, 0, 0, 10] }, h2: { fontSize: 13, bold: true, color: NAVY, margin: [0, 10, 0, 6] }, h3: { fontSize: 11.5, bold: true, color: "#8A6D12", margin: [0, 8, 0, 4] } },
     header: (p) => p <= 1 ? null : { text: `${A.company.name} — Бизнес төсөл`, alignment: "right", fontSize: 8, color: GREY, margin: [85, 25, 42, 0] },
     footer: (p, n) => p <= 1 ? null : { columns: [{ text: A.company.name, fontSize: 8, color: GREY }, { text: `Хуудас ${p} / ${n}`, alignment: "right", fontSize: 8, color: GREY }], margin: [85, 20, 42, 0] },

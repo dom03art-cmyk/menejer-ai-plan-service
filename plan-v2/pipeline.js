@@ -25,7 +25,17 @@ async function runPipeline(job, log = console.log) {
   step("4/7 бүлгүүдийг бичиж байна");
   const written = await writeAll({ A, facts: fin.facts, research: res, conversation: job.conversation }, undefined, (g) => log(`[${job.id}]   ✓ ${g}`));
   step("5/7 график");
-  const charts = await renderAll(fin.charts);
+  // AI-ийн судалгааны тоогоор үүсгэсэн графикууд (макро, микро орчин г.м.)
+  const llmSpecs = {}; let nChart = 0;
+  for (const id of Object.keys(written)) for (const b of written[id] || []) {
+    if (b.type !== "chart") continue;
+    const labels = Array.isArray(b.labels) ? b.labels.map(String) : [];
+    const series = (Array.isArray(b.series) ? b.series : []).map(s => [String(s.name || ""), (s.values || []).map(Number)]).filter(s => s[1].length === labels.length && s[1].every(isFinite));
+    if (!labels.length || !series.length) { b.type = "skip"; continue; }
+    b.key = "llm" + (nChart++);
+    llmSpecs[b.key] = { type: ["bar", "line", "pie"].includes(b.chart_type) ? b.chart_type : "bar", title: String(b.title || ""), labels, series: b.chart_type === "pie" ? series.slice(0, 1) : series };
+  }
+  const charts = await renderAll({ ...fin.charts, ...llmSpecs });
   step("6/7 Word угсарч байна");
   let doc = await buildDoc({ A, written, fin, charts, pages: [] });
   let text = null, nPages = null;

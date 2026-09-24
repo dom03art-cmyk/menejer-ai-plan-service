@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
+    "@expo-google-fonts/tinos": "^0.4.2",
     "cors": "^2.8.5",
     "dejavu-fonts-ttf": "^2.37.3",
     "docx": "^9.0.2",

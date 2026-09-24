@@ -5,6 +5,7 @@ const OUTLINE = require("./outline");
 const NAVY = "1B2A4A", GOLD = "C9A227", GREY = "595959", LIGHT = "F3F0E6", W = 9300;
 const A4 = { width: 11906, height: 16838 }, MARGIN = { top: 1134, bottom: 1134, left: 1701, right: 850 };
 
+const FONT = "Times New Roman";
 const runs = (t, base = {}) => String(t ?? "").split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map(p => p.startsWith("**") ? new TextRun({ text: p.slice(2, -2), bold: true, size: 24, ...base }) : new TextRun({ text: p, size: 24, ...base }));
 const H = (lvl, text, heads) => { heads.push({ lvl, text });
   return new Paragraph({ heading: [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3][lvl - 1], pageBreakBefore: lvl === 1, keepNext: true,
@@ -50,7 +51,39 @@ function renderBlocks(blocks, ctx) {
       case "chart": {
         const c = ctx.charts[b.key]; if (!c) break;
         const w = 520, h = Math.round(w * c.height / c.width);
-        out.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 120, after: 120 }, children: [new ImageRun({ type: "png", data: c.buf, transformation: { width: w, height: h } })] })); break;
+        out.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: !!b.source, spacing: { before: 120, after: b.source ? 40 : 120 }, children: [new ImageRun({ type: "png", data: c.buf, transformation: { width: w, height: h } })] }));
+        if (b.source) out.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 160 }, children: [new TextRun({ text: `Эх сурвалж: ${b.source}`, size: 18, italics: true, color: GREY })] }));
+        break;
+      }
+      case "flow": {
+        const steps = (b.steps || []).map(String).filter(Boolean).slice(0, 10); if (!steps.length) break;
+        if (b.title) out.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 120, after: 60 }, children: [new TextRun({ text: b.title, bold: true, size: 20, color: NAVY })] }));
+        const box = (t, i, wdt) => new TableCell({ width: { size: wdt, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: LIGHT }, margins: { top: 80, bottom: 80, left: 80, right: 80 },
+          borders: { top: { style: "single", size: 8, color: NAVY }, bottom: { style: "single", size: 8, color: NAVY }, left: { style: "single", size: 8, color: NAVY }, right: { style: "single", size: 8, color: NAVY } },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${i + 1}`, bold: true, size: 20, color: GOLD })] }), new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: t, size: 18 })] })] });
+        const arrow = (sym, wdt) => new TableCell({ width: { size: wdt, type: WidthType.DXA }, borders: { top: { style: "nil" }, bottom: { style: "nil" }, left: { style: "nil" }, right: { style: "nil" } }, verticalAlign: "center",
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: sym, bold: true, size: 28, color: GOLD })] })] });
+        const per = steps.length <= 5 ? steps.length : Math.ceil(steps.length / 2);
+        for (let r = 0; r < steps.length; r += per) {
+          const part = steps.slice(r, r + per);
+          if (r) out.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, children: [new TextRun({ text: "↓", bold: true, size: 28, color: GOLD })] }));
+          const aw = 360, bw = Math.floor((W - aw * (part.length - 1)) / part.length);
+          const cells = [], widths = [];
+          part.forEach((s, j) => { if (j) { cells.push(arrow("→", aw)); widths.push(aw); } cells.push(box(s, r + j, bw)); widths.push(bw); });
+          out.push(new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: widths, rows: [new TableRow({ cantSplit: true, children: cells })] }));
+        }
+        out.push(new Paragraph({ spacing: { after: 160 }, children: [] })); break;
+      }
+      case "org": {
+        const units = (b.units || []).slice(0, 5); if (!units.length) break;
+        if (b.title) out.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 120, after: 60 }, children: [new TextRun({ text: b.title, bold: true, size: 20, color: NAVY })] }));
+        out.push(new Table({ width: { size: 3600, type: WidthType.DXA }, columnWidths: [3600], alignment: AlignmentType.CENTER, rows: [new TableRow({ children: [new TableCell({ width: { size: 3600, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: NAVY }, margins: { top: 100, bottom: 100, left: 100, right: 100 },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(b.head || "Гүйцэтгэх захирал").toUpperCase(), bold: true, size: 20, color: "FFFFFF" })] })] })] })] }));
+        out.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 0 }, children: [new TextRun({ text: "↓", bold: true, size: 28, color: GOLD })] }));
+        const uw = Math.floor(W / units.length);
+        out.push(new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: units.map(() => uw), rows: [new TableRow({ cantSplit: true, children: units.map(u => new TableCell({ width: { size: uw, type: WidthType.DXA }, shading: { type: ShadingType.CLEAR, fill: LIGHT }, margins: { top: 80, bottom: 80, left: 80, right: 80 },
+          children: [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [new TextRun({ text: String(u.name || ""), bold: true, size: 19, color: NAVY })] }), ...(u.roles || []).map(r => new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: String(r), size: 17 })] }))] })) })] }));
+        out.push(new Paragraph({ spacing: { after: 160 }, children: [] })); break;
       }
     }
   }
@@ -93,7 +126,7 @@ async function buildDoc({ A, written, fin, charts, pages }) {
     ? ctx.heads.map((hd, i) => new Paragraph({ tabStops: [{ type: TabStopType.RIGHT, position: W, leader: LeaderType.DOT }], indent: { left: (hd.lvl - 1) * 400 }, spacing: { before: hd.lvl === 1 ? 120 : 0, after: 40 },
       children: [new TextRun({ text: hd.text, bold: hd.lvl === 1, size: hd.lvl === 3 ? 20 : 22, color: hd.lvl === 1 ? NAVY : "000000" }), new TextRun({ text: `\t${pages[i] ?? ""}`, bold: hd.lvl === 1, size: hd.lvl === 3 ? 20 : 22 })] }))
     : [new TableOfContents("Гарчиг", { hyperlink: true, headingStyleRange: "1-3" })];
-  const doc = new Document({ styles: { default: { document: { run: { font: "Arial" } } } }, features: { updateFields: !pages },
+  const doc = new Document({ styles: { default: { document: { run: { font: FONT } }, heading1: { run: { font: FONT } }, heading2: { run: { font: FONT } }, heading3: { run: { font: FONT } } } }, features: { updateFields: !pages },
     sections: [
       { properties: { page: { size: A4, margin: MARGIN } }, children: cover(A) },
       { properties: { page: { size: A4, margin: MARGIN } }, headers: { default: header }, footers: { default: footer }, children: [tocTitle, ...toc] },
