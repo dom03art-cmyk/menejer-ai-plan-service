@@ -63,7 +63,15 @@ async function runPipeline(job, log = console.log) {
   if (job.psid && process.env.PLAN_MOCK !== "1") {
     if (job.pdf) await fbFile(job.psid, job.pdf, fname.replace(/\.docx$/, ".pdf"), "application/pdf");
     await fbFile(job.psid, doc.buffer, fname);
-    if ((A.missing_info || []).length) await fbText(job.psid, `Төсөл бэлэн боллоо. Банкинд өгөхийн өмнө дараах мэдээллийг нөхөөрэй: ${A.missing_info.join(", ")}.`);
+    const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
+    await fbText(job.psid, `✅ Таны бизнес төсөл бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.
+
+⚠️ Чухал сануулга: Энэ төслийг таны өгсөн мэдээлэл болон нээлттэй эх сурвалжийн судалгаанд үндэслэн хиймэл оюун ухаан боловсруулсан. Банк, санхүүжүүлэгчид өгөхөөс өмнө заавал сайтар уншиж, хянаж засварлана уу:
+1. Бүх тоо (үнэ, өртөг, цалин, түрээс, зээлийн хүү, хөрөнгө оруулалт) таны бодит мэдээлэлтэй таарч байгаа эсэхийг шалгах.
+2. «[Захиалагч бөглөнө]» гэж тэмдэглэсэн хэсгүүдийг (регистр, хаяг, барьцаа хөрөнгө г.м.) нөхөж бичих.
+3. 4-р бүлгийн «Таамаглалын хуудас»-нд «Таамаглал» гэж тэмдэглэсэн тоонуудыг өөрийн бодит тоогоор солих.${missing}
+
+Таны өгсөн мэдээлэл хэдий чинээ дэлгэрэнгүй, бодит байна төдий чинээ төсөл үнэн зөв гарна.`);
   }
   if (process.env.MAKE_DONE_WEBHOOK && process.env.PLAN_MOCK !== "1") {
     await fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "done", ...job.result, qc: job.qc }) }).catch(e => log("webhook алдаа " + e.message));

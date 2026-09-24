@@ -34,7 +34,7 @@ router.post("/jobs/plan", express.json({ limit: "2mb" }), auth, async (req, res)
   const job = { id, psid, conversation, assumptions, status: "queued", createdAt: Date.now() };
   jobs.set(id, job); if (psid) activeByPsid.set(psid, id); queue.push(job);
   res.status(202).json({ job_id: id, status: "queued", position: queue.length });
-  if (psid && notify) fbText(psid, "Таны бизнес төслийг боловсруулж эхэллээ. Ойролцоогоор 15–25 минутын дараа Word файлаар илгээнэ.").catch(() => { });
+  if (psid && notify) fbText(psid, "Таны бизнес төслийг боловсруулж эхэллээ ⏳ Ойролцоогоор 20–30 минутын дараа PDF болон Word файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.").catch(() => { });
   pump();
 });
 
