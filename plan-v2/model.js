@@ -56,7 +56,7 @@ function run(A, o = {}) {
     Y.ebitda = Y.gross - Y.deliv - Y.fees - Y.mkt - Y.fixed_tot;
     let dep = 0;
     for (const c of A.capex) if (y < c.life) dep += c.qty * c.unit_price / c.life;
-    for (const c of (A.inkind || [])) if (y < c.life) dep += c.value / c.life;
+    for (const c of (A.inkind || [])) if (c.depreciable !== false && c.life > 0 && y < c.life) dep += c.value / c.life;
     for (const e of (A.extra_capex || [])) if (y + 1 >= e.year && y + 1 < e.year + e.life) dep += e.amount / e.life;
     Y.dep = dep; Y.ebit = Y.ebitda - dep;
     const ms = sched.slice(y * 12, y * 12 + 12);
@@ -92,7 +92,8 @@ function run(A, o = {}) {
     bs.push({ cash, inv: Y.inv_end, fa: faGross - accdep, loan_cur: nxt, loan_lt: Math.max(0, loanbal - nxt), eq: eq0, re });
   });
   for (const b of bs) { b.assets = b.cash + b.inv + b.fa; b.le = b.loan_cur + b.loan_lt + b.eq + b.re; b.diff = b.assets - b.le; }
-  const inv0 = capexTotal + A.init_inventory + inkindTotal;
+  // NPV/IRR нь ШИНЭ хөрөнгө оруулалтад (зээл + мөнгөн өөрийн хөрөнгө) суурилна; одоо эзэмшиж буй хөрөнгө (inkind) нь өмнө нь гарсан зардал тул тооцохгүй
+  const inv0 = capexTotal + A.init_inventory + (A.cash_equity || 0);
   const fcf = [-inv0];
   years.forEach((Y, y) => { let f = Y.ebitda - Y.tax - Y.capex_extra - cfs[y].dinv; if (y === 4) f += Y.inv_end; fcf.push(f); });
   const dscr = years.map(Y => Y.ds > 0 ? (Y.ebitda - Y.tax) / Y.ds : null);

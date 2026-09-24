@@ -20,17 +20,20 @@ const SYSTEM = `Чи Монголын банкны зээлийн шинжээч
 3. Бизнесийн бүх орлогын эх үүсвэрийг тусга (жишээ нь мал аж ахуйд: мах/амьд мал борлуулалт, төллөлтөөр сүргийн өсөлт, сүү, арьс шир, бордоо; үйлдвэрт: дайвар бүтээгдэхүүн). Сүргийн өсөлт, хүчин чадлын ашиглалтыг жил бүр бодитоор өсгө.
 4. Зээлийн бүтцийг төслийн мөчлөгт тааруулж болно: хугацаа 60 сар хүртэл, үндсэн төлбөрийн хөнгөлөлт 12 сар хүртэл (мал аж ахуй, газар тариалан, барилгын үе шаттай төсөлд ердийн).
 5. Тоо зохиож хөөргөхгүй — бодит бус өндөр үнэ, хэт өөдрөг борлуулалт хэрэглэхгүй. Хэрэв бодит түвшинд ч төсөл ашиггүй бол тэгж үлдээж, шалтгаанаа тайлбарла.
-6. Өөрчилсөн зүйл бүрийг changes-д Монгол хэлээр, хуучин → шинэ утга, шалтгаантай нь бич.
-Зөвхөн JSON буцаа: {"assumptions": {...бүтэн шинэчилсэн таамаглалын объект, ижил бүтэцтэй...}, "changes": ["..."], "verdict": "viable|not_viable", "reason": "товч тайлбар"}`;
+6. Түгээмэл алдааг заавал шалга: захиалагч ажилтан авахгүй гэсэн ч staff-д цалин тооцсон эсэх (эзэмшигчийн хөдөлмөр зардал биш); мал, газрыг элэгдүүлсэн эсэх (depreciable: false болго); орлогын эх үүсвэр орхигдсон эсэх; тогтмол зардал хэт өндөр эсэх.
+7. Өөрчилсөн зүйл бүрийг changes-д Монгол хэлээр, хуучин → шинэ утга, шалтгаантай нь бич.
+Зөвхөн JSON буцаа. Бүтэн таамаглалыг бүү давт — ЗӨВХӨН өөрчлөх дээд түвшний талбаруудыг patch-д бүтнээр нь бич (жишээ нь "staff": [], "products": [...шинэчилсэн бүтэн жагсаалт], "loan": {...}):
+{"patch": {...}, "changes": ["..."], "verdict": "viable|not_viable", "reason": "товч тайлбар"}`;
 
 async function review(A, an, research, conversation, log) {
   let best = { A, an, changes: [] };
   for (let round = 1; round <= 2 && !viable(best.an); round++) {
     const user = `ОДООГИЙН ТААМАГЛАЛ:\n${JSON.stringify(best.A)}\n\nҮР ДҮН: ${JSON.stringify(metrics(best.an))}\n\nЗАХИАЛАГЧИЙН ЯРИА:\n${(conversation || "").slice(0, 10000)}\n\nСУДАЛГААНЫ БАРИМТ:\n${JSON.stringify([...(research.market || []), ...(research.macro || [])].slice(0, 30))}`;
     let out;
-    try { out = await callJSON({ system: SYSTEM, user, maxTokens: 12000 }); } catch (e) { log(`feasibility алдаа: ${e.message}`); break; }
-    if (!out || !out.assumptions) break;
-    let A2; try { A2 = normalize({ ...best.A, ...out.assumptions, assumed_fields: [...new Set([...(best.A.assumed_fields || []), ...((out.assumptions.assumed_fields) || [])])] }); } catch (e) { log(`feasibility normalize алдаа: ${e.message}`); break; }
+    try { out = await callJSON({ system: SYSTEM, user, maxTokens: 8000 }); } catch (e) { log(`feasibility алдаа: ${e.message}`); break; }
+    const patch = out && (out.patch || out.assumptions);
+    if (!patch) break;
+    let A2; try { A2 = normalize({ ...best.A, ...patch, loan: { ...best.A.loan, ...(patch.loan || {}) }, assumed_fields: [...new Set([...(best.A.assumed_fields || []), ...(patch.assumed_fields || [])])] }); } catch (e) { log(`feasibility normalize алдаа: ${e.message}`); break; }
     const an2 = analyse(A2);
     log(`feasibility ${round}: NPV ${Math.round(best.an.npv)} → ${Math.round(an2.npv)}, DSCR1 ${best.an.R.dscr[0]} → ${an2.R.dscr[0]}`);
     if (score(an2) > score(best.an)) best = { A: A2, an: an2, changes: [...best.changes, ...(out.changes || [])], reason: out.reason };
