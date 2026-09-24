@@ -6,6 +6,7 @@ const { research } = require("./research");
 const { writeAll } = require("./chapters");
 const { renderAll } = require("./charts");
 const { buildDoc } = require("./document");
+const { buildPdf } = require("./pdf");
 const { hasSoffice, findPages, qc, fbText, fbFile } = require("./util");
 const { usage } = require("./claude");
 
@@ -36,12 +37,21 @@ async function runPipeline(job, log = console.log) {
     doc = await buildDoc({ A, written, fin, charts, pages: null }); // Word "Update Field" гарчиг
   }
   job.qc = qc({ an, text, heads: doc.heads, written });
+  // Утсан дээр уншихад зориулсан PDF (гарчиг бодит хуудасны дугаартай)
+  try {
+    const pdf = await buildPdf({ A, written, fin, charts });
+    job.pdf = pdf.buffer;
+    nPages = nPages || (pdf.buffer.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
+  } catch (e) { log(`[${job.id}] PDF үүсгэж чадсангүй: ${e.message}`); job.qc.push("PDF үүсгэж чадсангүй"); }
   job.result = { pages: nPages, tables: doc.tables, headings: doc.heads.length, npv: Math.round(an.npv), irr: +(an.irr * 100).toFixed(1), dscr: an.R.dscr.slice(0, 3), usage: { ...usage }, seconds: Math.round((Date.now() - t0) / 1000), missing_info: A.missing_info || [], assumed: A.assumed_fields || [] };
   job.buffer = doc.buffer;
   step("7/7 илгээж байна");
-  const fname = `business-plan-${(A.company.name || "plan").replace(/[^a-zA-Z0-9]+/g, "").slice(0, 20) || "plan"}-${new Date().toISOString().slice(0, 10)}.docx`;
+  const TR = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "yo", ж: "j", з: "z", и: "i", й: "i", к: "k", л: "l", м: "m", н: "n", о: "o", ө: "u", п: "p", р: "r", с: "s", т: "t", у: "u", ү: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh", щ: "sh", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya" };
+  const slug = [...(A.company.name || "plan").toLowerCase()].map(c => TR[c] ?? c).join("").replace(/\b(khkhk|llc)\b/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "plan";
+  const fname = `${slug}-biznes-tusul-${new Date().toISOString().slice(0, 10)}.docx`;
   job.filename = fname;
   if (job.psid && process.env.PLAN_MOCK !== "1") {
+    if (job.pdf) await fbFile(job.psid, job.pdf, fname.replace(/\.docx$/, ".pdf"), "application/pdf");
     await fbFile(job.psid, doc.buffer, fname);
     if ((A.missing_info || []).length) await fbText(job.psid, `Төсөл бэлэн боллоо. Банкинд өгөхийн өмнө дараах мэдээллийг нөхөөрэй: ${A.missing_info.join(", ")}.`);
   }

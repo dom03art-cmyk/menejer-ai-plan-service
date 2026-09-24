@@ -5,5 +5,6 @@ const { runPipeline } = require("../plan-v2/pipeline");
 const A = JSON.parse(fs.readFileSync(process.argv[2] || __dirname + "/domart-assumptions.json", "utf8"));
 runPipeline({ id: "local", assumptions: A, conversation: "" }).then(j => {
   fs.writeFileSync(__dirname + "/out.docx", j.buffer);
+  if (j.pdf) fs.writeFileSync(__dirname + "/out.pdf", j.pdf);
   console.log(JSON.stringify({ result: j.result, qc: j.qc }, null, 1));
 }).catch(e => { console.error(e); process.exit(1); });

@@ -47,13 +47,13 @@ async function fbText(psid, text) {
   const r = await fetch(`${GRAPH}?access_token=${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { text } }) });
   if (!r.ok) console.warn("[fb] text", r.status, await r.text());
 }
-async function fbFile(psid, buf, filename) {
+async function fbFile(psid, buf, filename, mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
   const token = process.env.FB_PAGE_TOKEN; if (!token) throw new Error("FB_PAGE_TOKEN тохируулаагүй");
   const form = new FormData();
   form.append("recipient", JSON.stringify({ id: psid }));
   form.append("messaging_type", "RESPONSE");
   form.append("message", JSON.stringify({ attachment: { type: "file", payload: { is_reusable: false } } }));
-  form.append("filedata", new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" }), filename);
+  form.append("filedata", new Blob([buf], { type: mime }), filename);
   const r = await fetch(`${GRAPH}?access_token=${token}`, { method: "POST", body: form });
   if (!r.ok) throw new Error(`FB файл илгээхэд алдаа ${r.status}: ${await r.text()}`);
   return r.json();
