@@ -36,6 +36,8 @@ function qc({ an, text, heads, written }) {
     for (const w of ["skill", ".py", "prompt", "JSON", "Claude", "аль хэдийн", "undefined", "NaN", "[object"]) if (text.includes(w)) issues.push(`Текстэд хориотой үг: "${w}"`);
   }
   const seen = new Set(); for (const h of heads) { const num = (h.text.match(/^(\d+(\.\d+)*)\s/) || [])[1]; if (num) { if (seen.has(num)) issues.push(`Давхардсан дугаар: ${num}`); seen.add(num); } }
+  if (an.npv < 0) issues.push(`NPV сөрөг (${Math.round(an.npv)})`);
+  if (Math.min(...an.R.mc.map(x => x.cash)) < 0) issues.push("Сарын мөнгөн үлдэгдэл сөрөг болж байна");
   const d = an.R.dscr[0]; if (d !== null && d < 1.2) issues.push(`1-р жилийн DSCR ${d.toFixed(2)} < 1.2 — банкны шаардлага хангахгүй байж болзошгүй`);
   return issues;
 }

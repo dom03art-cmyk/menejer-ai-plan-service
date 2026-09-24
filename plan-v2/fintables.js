@@ -22,7 +22,7 @@ function build(an) {
     ["Үндсэн үйл ажиллагаа", A.company.core_business || "—"], ["Төслийн хугацаа", `5 жил; зээл ${A.loan.months} сар`],
     ["Нийт төслийн өртөг", `${f(total)} ₮`], ["Хүсэж буй зээл", `${f(A.loan.amount)} ₮ (${pc(A.loan.amount / total)}) — ${A.project.funder || "банк"}`],
     ["Өөрийн хөрөнгө", `${f(own)} ₮ (${pc(own / total)})`], ["Зээлийн хүү (тооцоонд)", `Сарын ${(A.loan.rate_monthly * 100).toFixed(2)}%`],
-    ["Сарын зээлийн төлбөр", SC[0] ? `${f(SC[0].pay)} ₮` : "—"], ["NPV (20%)", `${f(an.npv)} ₮`], ["IRR", pc(an.irr)],
+    ["Сарын зээлийн төлбөр", SC.length ? ((A.loan.grace_months || 0) > 0 ? `Эхний ${A.loan.grace_months} сар: ${f(SC[0].pay)} ₮ (зөвхөн хүү); дараа нь: ${f(SC[A.loan.grace_months].pay)} ₮` : `${f(SC[0].pay)} ₮`) : "—"], ["NPV (20%)", `${f(an.npv)} ₮`], ["IRR", pc(an.irr)],
     ["Нөхөгдөх хугацаа", an.pb ? `${an.pb.toFixed(2)} жил` : "5+ жил"],
     ["DSCR (1/2/3-р жил)", R.dscr.slice(0, 3).map(d => d ? d.toFixed(2) : "—").join(" / ")],
   ], [1])];
@@ -103,7 +103,7 @@ function build(an) {
 
   // AI-д өгөх товч тоон мэдээлэл (AI тоо зохиохгүй, эндээс иш татна)
   const facts = {
-    total_project: total, loan: A.loan, own_equity: own, monthly_payment: SC[0] ? Math.round(SC[0].pay) : 0,
+    total_project: total, loan: A.loan, own_equity: own, monthly_payment_after_grace: SC.length ? Math.round(SC[Math.min(SC.length - 1, A.loan.grace_months || 0)].pay) : 0, grace_interest_only_payment: (A.loan.grace_months || 0) > 0 ? Math.round(SC[0].pay) : null,
     years: Y.map((y, i) => ({ year: i + 1, revenue: Math.round(y.rev), gross: Math.round(y.gross), ebitda: Math.round(y.ebitda), net_income: Math.round(y.ni), debt_service: Math.round(y.ds), dscr: R.dscr[i] ? +R.dscr[i].toFixed(2) : null, units: Object.fromEntries(Object.entries(y.units).map(([k, v]) => [k, Math.round(v)])), marketing: Math.round(y.mkt) })),
     npv: Math.round(an.npv), irr: +(an.irr * 100).toFixed(1), payback_years: an.pb ? +an.pb.toFixed(2) : null, bep_revenue_y1: Math.round(an.bep.revenue), grace6_dscr_y1: an.grace6 ? +an.grace6.toFixed(2) : null,
     scenarios: Object.fromEntries(SK.map(k => [k, { rev_y1: Math.round(S[k].rev[0]), dscr: S[k].dscr.map(d => d ? +d.toFixed(2) : null), npv: Math.round(S[k].npv) }])),

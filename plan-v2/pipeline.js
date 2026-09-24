@@ -9,21 +9,27 @@ const { buildDoc } = require("./document");
 const { buildPdf } = require("./pdf");
 const { hasSoffice, findPages, qc, fbText, fbFile } = require("./util");
 const { usage } = require("./claude");
+const { review } = require("./feasibility");
 
 async function runPipeline(job, log = console.log) {
   const t0 = Date.now(); const step = (s) => { job.step = s; log(`[${job.id}] ${s} (${Math.round((Date.now() - t0) / 1000)}с)`); };
   step("1/7 таамаглал гаргаж байна");
-  const A = job.assumptions ? normalize(job.assumptions) : await extract(job.conversation);
-  step("2/7 санхүүгийн загвар");
-  const an = analyse(A);
-  const fin = build(an);
-  step("3/7 судалгаа");
+  const A0 = job.assumptions ? normalize(job.assumptions) : await extract(job.conversation);
+  step("2/7 судалгаа");
   let res = { macro: [], market: [] };
-  try { res = await research(A); } catch (e) { log(`[${job.id}] судалгаа амжилтгүй, судалгаагүй үргэлжилнэ: ${e.message}`); }
+  try { res = await research(A0); } catch (e) { log(`[${job.id}] судалгаа амжилтгүй, судалгаагүй үргэлжилнэ: ${e.message}`); }
+  step("3/7 санхүүгийн загвар ба боломжийн шалгалт");
+  const rv = await review(A0, analyse(A0), res, job.conversation, (m) => log(`[${job.id}] ${m}`));
+  const A = rv.A, an = rv.an;
+  const fin = build(an);
+  fin.facts.feasibility = { viable: rv.viable, changes: rv.changes, reason: rv.reason || "" };
+  job.feasibility = fin.facts.feasibility;
   fin.sources = [...new Set([...res.macro, ...res.market].map(x => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
   if (!fin.sources.length) fin.sources = ["Захиалагчийн өгсөн мэдээлэл", "Төслийн санхүүгийн загвар"];
   step("4/7 бүлгүүдийг бичиж байна");
   const written = await writeAll({ A, facts: fin.facts, research: res, conversation: job.conversation }, undefined, (g) => log(`[${job.id}]   ✓ ${g}`));
+  if (!rv.viable) (written["1.1"] = written["1.1"] || []).unshift({ type: "box", title: "⚠️ Анхааруулга: төслийн санхүүгийн үзүүлэлт шаардлага хангахгүй байна", text: `Одоогийн таамаглалаар төсөл банкны шаардлагыг (DSCR ≥ 1.2, NPV > 0) хангахгүй байна. ${rv.reason || ""}\nБанкинд өгөхөөс өмнө борлуулалтын үнэ, хэмжээ, зардал, зээлийн дүн, хугацааг бодит мэдээллээр шинэчилж, төслийг дахин боловсруулах шаардлагатай.` });
+  if (rv.changes.length) (written["4.1"] = written["4.1"] || []).push({ type: "box", title: "Боломжийн шалгалтаар шинэчилсэн таамаглал", text: rv.changes.map((c, i) => `${i + 1}. ${c}`).join("\n") });
   step("5/7 график");
   // AI-ийн судалгааны тоогоор үүсгэсэн графикууд (макро, микро орчин г.м.)
   const llmSpecs = {}; let nChart = 0;
@@ -63,6 +69,8 @@ async function runPipeline(job, log = console.log) {
   if (job.psid && process.env.PLAN_MOCK !== "1") {
     if (job.pdf) await fbFile(job.psid, job.pdf, fname.replace(/\.docx$/, ".pdf"), "application/pdf");
     await fbFile(job.psid, doc.buffer, fname);
+    const adj = rv.changes.length ? `\n\n🔧 Санхүүгийн тооцоог бодит зах зээлийн түвшинд тааруулахын тулд дараах таамаглалыг өөрчилсөн (4.1-р хэсэгт дэлгэрэнгүй):\n${rv.changes.slice(0, 6).map((c, i) => `${i + 1}. ${c}`).join("\n")}` : "";
+    const warn = rv.viable ? "" : `\n\n❗ Анхааруулга: Таны өгсөн мэдээллээр төсөл банкны шаардлагыг (зээл төлөх чадвар, ашигт ажиллагаа) хангахгүй гарсан. ${rv.reason || ""} Үнэ, борлуулалтын хэмжээ, зардал, зээлийн нөхцөлөө бодитоор шалгаад «засвар хийлгэх» сонголтоор дахин боловсруулуулна уу.`;
     const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
     await fbText(job.psid, `✅ Таны бизнес төсөл бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.
 
@@ -71,7 +79,7 @@ async function runPipeline(job, log = console.log) {
 2. «[Захиалагч бөглөнө]» гэж тэмдэглэсэн хэсгүүдийг (регистр, хаяг, барьцаа хөрөнгө г.м.) нөхөж бичих.
 3. 4-р бүлгийн «Таамаглалын хуудас»-нд «Таамаглал» гэж тэмдэглэсэн тоонуудыг өөрийн бодит тоогоор солих.${missing}
 
-Таны өгсөн мэдээлэл хэдий чинээ дэлгэрэнгүй, бодит байна төдий чинээ төсөл үнэн зөв гарна.`);
+Таны өгсөн мэдээлэл хэдий чинээ дэлгэрэнгүй, бодит байна төдий чинээ төсөл үнэн зөв гарна.${adj}${warn}`);
   }
   if (process.env.MAKE_DONE_WEBHOOK && process.env.PLAN_MOCK !== "1") {
     await fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "done", ...job.result, qc: job.qc }) }).catch(e => log("webhook алдаа " + e.message));
