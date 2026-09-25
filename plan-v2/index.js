@@ -17,7 +17,13 @@ function pump() {
     const job = queue.shift(); running++; job.status = "running";
     runPipeline(job).then(() => { job.status = "done"; })
       .catch(async (e) => {
-        if (shuttingDown) return; job.status = "failed"; job.error = e.message; console.error(`[${job.id}] АЛДАА`, e);
+        if (shuttingDown) return;
+        if (e.status === "revision_rejected") {
+          job.status = "rejected";
+          if (process.env.MAKE_DONE_WEBHOOK) fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "revision_rejected", history: e.cleanedHistory || "" }) }).catch(() => { });
+          return;
+        }
+        job.status = "failed"; job.error = e.message; console.error(`[${job.id}] АЛДАА`, e);
         const credit = /credit balance/i.test(e.message || "");
         if (job.psid) await fbText(job.psid, credit ? "Уучлаарай, систем түр саатаж байна. Засагдмагц таны төслийг автоматаар боловсруулж илгээнэ. Хүлээсэнд баярлалаа 🙏" : "Уучлаарай, төсөл боловсруулахад техникийн саатал гарлаа. Та дурын мессеж бичиж дахин эхлүүлж болно, эсвэл манай ажилтан тантай удахгүй холбогдоно.").catch(() => { });
         if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, credit ? "⚠️ Anthropic API кредит дууссан! platform.claude.com → Billing хэсгээс кредит нэмнэ үү. Захиалагч хүлээгдэж байна." : `⚠️ Төсөл боловсруулахад алдаа гарлаа (job ${job.id}): ${String(e.message).slice(0, 300)}`).catch(() => { });

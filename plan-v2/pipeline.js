@@ -10,9 +10,20 @@ const { buildPdf } = require("./pdf");
 const { hasSoffice, findPages, qc, fbText, fbFile } = require("./util");
 const { usage } = require("./claude");
 const { review } = require("./feasibility");
+const { checkRevisionScope } = require("./scope");
 
 async function runPipeline(job, log = console.log) {
   const t0 = Date.now(); const step = (s) => { job.step = s; log(`[${job.id}] ${s} (${Math.round((Date.now() - t0) / 1000)}с)`); };
+  // Засварын хүсэлт анхны сэдвийн хүрээнд эсэхийг шалгах
+  if (job.conversation) {
+    let sc = { inScope: true };
+    try { sc = await checkRevisionScope(job.conversation); } catch (e) { log(`[${job.id}] scope шалгалт алгасав: ${e.message}`); }
+    if (!sc.inScope) {
+      log(`[${job.id}] засвар хүрээнээс гадуур: ${sc.original_topic} → ${sc.requested_topic}`);
+      if (job.psid && process.env.PLAN_MOCK !== "1") await fbText(job.psid, `Уучлаарай, үнэгүй засвар нь зөвхөн анхны төслийн (${sc.original_topic || "таны бизнес"}) хүрээнд хийгдэнэ. Таны хүсэлт өөр бизнесийн шинэ төсөл (${sc.requested_topic || "өөр сэдэв"}) болж байна.\n\nЗасварын эрх тань хасагдаагүй. Анхны төслийнхөө тоо, мэдээллийг өөрчлөх засвар хүсвэл дахин бичнэ үү. Шинэ сэдвээр төсөл хэрэгтэй бол «шинэ төсөл захиалах» сонголтыг ашиглана уу.`).catch(() => { });
+      const err = new Error("revision_out_of_scope"); err.status = "revision_rejected"; err.cleanedHistory = sc.cleanedHistory; throw err;
+    }
+  }
   step("1/7 таамаглал гаргаж байна");
   const A0 = job.assumptions ? normalize(job.assumptions) : await extract(job.conversation);
   step("2/7 судалгаа");
