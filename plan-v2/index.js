@@ -8,7 +8,7 @@ const router = express.Router();
 const jobs = new Map();          // id -> job
 const activeByPsid = new Map();  // psid -> id (давхар ажил үүсэхээс сэргийлнэ)
 const queue = []; let running = 0;
-const MAX_PARALLEL = Number(process.env.PLAN_MAX_PARALLEL || 1);
+const MAX_PARALLEL = Number(process.env.PLAN_MAX_PARALLEL || 2);
 
 function auth(req, res, next) { if (req.get("x-api-key") !== process.env.API_KEY) return res.status(401).json({ error: "unauthorized" }); next(); }
 
@@ -17,7 +17,7 @@ function pump() {
     const job = queue.shift(); running++; job.status = "running";
     runPipeline(job).then(() => { job.status = "done"; })
       .catch(async (e) => {
-        job.status = "failed"; job.error = e.message; console.error(`[${job.id}] АЛДАА`, e);
+        if (shuttingDown) return; job.status = "failed"; job.error = e.message; console.error(`[${job.id}] АЛДАА`, e);
         if (job.psid) await fbText(job.psid, "Уучлаарай, төсөл боловсруулахад техникийн саатал гарлаа. Манай ажилтан тантай удахгүй холбогдоно.").catch(() => { });
         if (process.env.MAKE_DONE_WEBHOOK) fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "failed", error: e.message }) }).catch(() => { });
       })
@@ -47,7 +47,30 @@ router.get("/jobs/:id/file", auth, (req, res) => {
   const j = jobs.get(req.params.id); if (!j || !j.buffer) return res.status(404).json({ error: "file not ready" });
   res.set({ "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "Content-Disposition": `attachment; filename="${j.filename}"` }).send(j.buffer);
 });
+// Render дахин асах (deploy/restart) үед SIGTERM ирнэ: дуусаагүй ажлуудыг Make-д "interrupted" гэж мэдэгдэнэ.
+// Make 2.5 минут хүлээгээд ижил яриагаар ажлыг автоматаар дахин эхлүүлнэ — захиалагч юу ч мэдэхгүй.
+let shuttingDown = false;
+process.on("SIGTERM", async () => {
+  if (shuttingDown) return; shuttingDown = true;
+  const pending = [...jobs.values()].filter(j => (j.status === "running" || j.status === "queued") && j.psid);
+  console.log(`[shutdown] ${pending.length} дуусаагүй ажлыг Make-д мэдэгдэж байна`);
+  if (process.env.MAKE_DONE_WEBHOOK) {
+    await Promise.allSettled(pending.map(j => fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: j.id, psid: j.psid, status: "interrupted" }), signal: AbortSignal.timeout(8000) })));
+  }
+  process.exit(0);
+});
+
 // Хуучин ажлуудыг 24 цагийн дараа санах ойгоос цэвэрлэх
 setInterval(() => { const now = Date.now(); for (const [id, j] of jobs) if (j.finishedAt && now - j.finishedAt > 24 * 3600e3) jobs.delete(id); }, 3600e3).unref();
+
+// Сервис дахин асахад санах ой дахь дараалал алдагддаг. Make-д мэдэгдэж,
+// "боловсруулж байна" төлөвтэй үлдсэн захиалгуудыг дахин илгээлгэнэ.
+if (process.env.MAKE_RESTART_WEBHOOK && process.env.PLAN_MOCK !== "1") {
+  setTimeout(() => {
+    fetch(process.env.MAKE_RESTART_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ event: "service_restarted", at: new Date().toISOString() }) })
+      .then(r => console.log("[plan-v2] restart мэдэгдэл илгээсэн", r.status)).catch(e => console.warn("[plan-v2] restart мэдэгдэл алдаа", e.message));
+  }, 15000).unref();
+}
 
 module.exports = router;
