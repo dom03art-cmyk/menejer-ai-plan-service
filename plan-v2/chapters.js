@@ -63,11 +63,19 @@ async function writeAll(ctx, concurrency = Number(process.env.PLAN_CONCURRENCY |
       const i = idx++, item = order[i];
       if (i >= firstCh1) while (done < firstCh1) await new Promise(r => setTimeout(r, 1000));
       try { result[item.id] = await writeSection(item, ctx); }
-      catch (e) { console.warn(`[chapters] ${item.id} бичиж чадсангүй: ${e.message}`); result[item.id] = []; }
+      catch (e) { console.warn(`[chapters] ${item.id} бичиж чадсангүй: ${e.message}`); result[item.id] = []; if (/credit balance/i.test(e.message)) { idx = order.length; throw e; } }
       done++; onProgress(`${item.id} (${done}/${order.length})`);
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
+  // Хоосон үлдсэн хэсгүүдийг нэг удаа дахин бичүүлнэ
+  const empty = order.filter(o => !(result[o.id] || []).length);
+  for (const item of empty) {
+    try { result[item.id] = await writeSection(item, ctx); onProgress(`${item.id} (дахин бичсэн)`); }
+    catch (e) { console.warn(`[chapters] ${item.id} дахин бичиж чадсангүй: ${e.message}`); if (/credit balance/i.test(e.message)) throw e; }
+  }
+  const still = order.filter(o => !(result[o.id] || []).length).map(o => o.id);
+  if (still.length > 2) throw new Error(`Хоосон хэсэг хэт олон (${still.join(", ")}) — дутуу төсөл илгээхгүй`);
   return result;
 }
 module.exports = { writeAll, writeSection };
