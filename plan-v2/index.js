@@ -75,4 +75,5 @@ if (process.env.MAKE_RESTART_WEBHOOK && process.env.PLAN_MOCK !== "1") {
   }, 15000).unref();
 }
 
+router.use(require("./files"));
 module.exports = router;

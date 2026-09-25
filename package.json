@@ -18,6 +18,8 @@
     "dejavu-fonts-ttf": "^2.37.3",
     "docx": "^9.0.2",
     "express": "^4.19.2",
-    "pdfmake": "^0.3.11"
+    "mammoth": "^1.8.0",
+    "pdfmake": "^0.3.11",
+    "xlsx": "^0.18.5"
   }
 }
