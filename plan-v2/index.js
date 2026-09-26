@@ -41,8 +41,17 @@ router.post("/jobs/plan", express.json({ limit: "2mb" }), auth, async (req, res)
   const id = crypto.randomUUID();
   const job = { id, psid, conversation, assumptions, status: "queued", createdAt: Date.now() };
   jobs.set(id, job); if (psid) activeByPsid.set(psid, id); queue.push(job);
-  res.status(202).json({ job_id: id, status: "queued", position: queue.length });
-  if (psid && notify) fbText(psid, "Таны бизнес төслийг боловсруулж эхэллээ ⏳ Ойролцоогоор 30–45 минутын дараа PDF болон Word файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.").catch(() => { });
+  // Дарааллын байрлалаас хамааруулж хүлээх хугацааг тооцно (нэг төсөл ~40 мин, MAX_PARALLEL зэрэг)
+  const ahead = running + queue.length - 1;             // энэ ажлаас өмнө байгаа (ажиллаж буй + дараалалд)
+  const waves = Math.floor(ahead / MAX_PARALLEL);        // хэдэн "ээлж" хүлээх вэ
+  const lo = 30 + waves * 40, hi = 45 + waves * 40;
+  res.status(202).json({ job_id: id, status: "queued", position: queue.length, eta_min: [lo, hi] });
+  if (psid && notify) {
+    const msg = waves === 0
+      ? "Таны бизнес төслийг боловсруулж эхэллээ ⏳ Ойролцоогоор 30–45 минутын дараа PDF болон Word файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно."
+      : `Таны захиалгыг хүлээн авлаа ✅ Одоогоор өөр захиалгууд боловсруулагдаж байгаа тул таны өмнө ${ahead} захиалга байна. Ойролцоогоор ${lo}–${hi} минутын дараа PDF болон Word файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.`;
+    fbText(psid, msg).catch(() => { });
+  }
   pump();
 });
 
