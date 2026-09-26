@@ -83,10 +83,12 @@ router.post("/files/extract", express.json({ limit: "1mb" }), auth, async (req, 
   if (Array.isArray(list) && list.length) {
     const items = list.map(a => ({ url: (a.payload && a.payload.url) || a.url, type: a.type })).filter(a => a.url).slice(0, 10);
     const parts = [], kinds = [], errors = [];
-    for (const [i, a] of items.entries()) {
-      try { const o = await extract(a); kinds.push(o.kind); parts.push(`(${i + 1}) ${o.summary}`); }
-      catch (e) { errors.push(e.message); }
-    }
+    // Зэрэг уншина (5 хүртэл нэг дор) — 5 зураг ~2 минутаас ~30 секунд болно
+    const results = new Array(items.length);
+    let next = 0;
+    const worker = async () => { while (next < items.length) { const i = next++; try { results[i] = await extract(items[i]); } catch (e) { results[i] = { error: e.message }; } } };
+    await Promise.all(Array.from({ length: Math.min(5, items.length) }, worker));
+    results.forEach((o, i) => { if (o && !o.error) { kinds.push(o.kind); parts.push(`(${i + 1}) ${o.summary}`); } else errors.push(o && o.error); });
     if (!parts.length) return res.json({ ok: false, message: errors[0] || "Файл уншиж чадсангүй" });
     const kind = [...new Set(kinds)].length === 1 ? kinds[0] : "mixed";
     return res.json({ ok: true, kind, count: parts.length, summary: parts.join("\n").slice(0, 6000) });
