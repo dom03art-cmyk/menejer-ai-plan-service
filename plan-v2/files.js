@@ -70,7 +70,28 @@ function auth(req, res, next) { if (req.get("x-api-key") !== process.env.API_KEY
 
 // body: { url, type, name } → { ok, kind, summary } (алдаа гарвал ok:false, message — Make захиалагчид дамжуулна)
 router.post("/files/extract", express.json({ limit: "1mb" }), auth, async (req, res) => {
-  try { const out = await extract(req.body || {}); res.json({ ok: true, ...out }); }
+  // Нэг мессежид олон хавсралт (жишээ нь 5 зураг) ирвэл бүгдийг уншиж нэгтгэнэ
+  let list = req.body && req.body.attachments;
+  if (typeof list === "string") { try { list = JSON.parse(list); } catch (_) { list = null; } }
+  // Make-ээс "url1|url2|..." ба "image|file|..." хэлбэрээр ирж болно
+  if (!list && req.body && typeof req.body.urls === "string" && req.body.urls.includes("|")) {
+    const us = req.body.urls.split("|"), ts = String(req.body.types || "").split("|");
+    list = us.map((u, i) => ({ url: u, type: ts[i] }));
+  } else if (!list && req.body && typeof req.body.urls === "string" && req.body.urls) {
+    req.body.url = req.body.urls; req.body.type = req.body.types;
+  }
+  if (Array.isArray(list) && list.length) {
+    const items = list.map(a => ({ url: (a.payload && a.payload.url) || a.url, type: a.type })).filter(a => a.url).slice(0, 10);
+    const parts = [], kinds = [], errors = [];
+    for (const [i, a] of items.entries()) {
+      try { const o = await extract(a); kinds.push(o.kind); parts.push(`(${i + 1}) ${o.summary}`); }
+      catch (e) { errors.push(e.message); }
+    }
+    if (!parts.length) return res.json({ ok: false, message: errors[0] || "Файл уншиж чадсангүй" });
+    const kind = [...new Set(kinds)].length === 1 ? kinds[0] : "mixed";
+    return res.json({ ok: true, kind, count: parts.length, summary: parts.join("\n").slice(0, 6000) });
+  }
+  try { const out = await extract(req.body || {}); res.json({ ok: true, count: 1, ...out }); }
   catch (e) { console.warn("[files]", e.message); res.json({ ok: false, message: e.message.includes("credit") ? "Систем түр саатаж байна" : e.message }); }
 });
 module.exports = router;
