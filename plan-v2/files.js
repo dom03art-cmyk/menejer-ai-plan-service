@@ -23,13 +23,31 @@ function kind(mime, name) {
   return "unknown";
 }
 
+// Google Drive / Docs / Sheets хуваалцсан холбоосыг шууд татах холбоос болгоно
+function directUrl(url) {
+  let m;
+  if ((m = url.match(/docs\.google\.com\/document\/d\/([\w-]+)/))) return { url: `https://docs.google.com/document/d/${m[1]}/export?format=docx`, name: "doc.docx" };
+  if ((m = url.match(/docs\.google\.com\/spreadsheets\/d\/([\w-]+)/))) return { url: `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=xlsx`, name: "sheet.xlsx" };
+  if ((m = url.match(/docs\.google\.com\/presentation\/d\/([\w-]+)/))) return { url: `https://docs.google.com/presentation/d/${m[1]}/export/pdf`, name: "slides.pdf" };
+  if ((m = url.match(/drive\.google\.com\/(?:file\/d\/|open\?id=|uc\?id=)([\w-]+)/))) return { url: `https://drive.google.com/uc?export=download&id=${m[1]}` };
+  return { url };
+}
+
 async function extract({ url, type, name }) {
-  const r = await fetch(url, { signal: AbortSignal.timeout(60000) });
-  if (!r.ok) throw new Error(`Файл татаж чадсангүй (${r.status})`);
+  const d = directUrl(url);
+  const r = await fetch(d.url, { signal: AbortSignal.timeout(60000), redirect: "follow" });
+  if (!r.ok) throw new Error(`Файл татаж чадсангүй (${r.status}). Холбоос нээлттэй (Anyone with the link) эсэхийг шалгана уу.`);
   const buf = Buffer.from(await r.arrayBuffer());
-  if (buf.length > MAX) throw new Error("Файл хэт том (20MB-аас их)");
   const mime = r.headers.get("content-type") || "";
-  const k = type === "image" ? "image" : kind(mime, name || url.split("?")[0]);
+  if (/text\/html/.test(mime) && /google/.test(d.url)) throw new Error("Google Drive файл хаалттай байна. Хуваалцах тохиргоог «Anyone with the link» болгоно уу.");
+  const cd = r.headers.get("content-disposition") || "";
+  const fname = (cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i) || [])[1] || d.name || name || url.split("?")[0];
+  return extractBuffer({ buf, mime, name: decodeURIComponent(fname), type });
+}
+
+async function extractBuffer({ buf, mime, name, type }) {
+  if (buf.length > MAX) throw new Error("Файл хэт том (20MB-аас их)");
+  const k = type === "image" ? "image" : kind(mime, name);
   let content;
   if (k === "image") {
     const mt = /png/.test(mime) ? "image/png" : /webp/.test(mime) ? "image/webp" : /gif/.test(mime) ? "image/gif" : "image/jpeg";
@@ -56,3 +74,5 @@ router.post("/files/extract", express.json({ limit: "1mb" }), auth, async (req, 
   catch (e) { console.warn("[files]", e.message); res.json({ ok: false, message: e.message.includes("credit") ? "Систем түр саатаж байна" : e.message }); }
 });
 module.exports = router;
+module.exports.extract = extract;
+module.exports.extractBuffer = extractBuffer;

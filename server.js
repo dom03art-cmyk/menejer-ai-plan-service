@@ -6,14 +6,14 @@ const { parseTextToSections, buildFinanceSections, mergeFinanceIntoSections } = 
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: "30mb" }));
 
 // Энгийн API key шалгалт (сонголтоор) — орчны хувьсагчид API_KEY заасан бол
 // зөвхөн зөв x-api-key толгойтой хүсэлтийг зөвшөөрнө. Make.com-ийн HTTP модульд
 // "Headers" хэсэгт x-api-key нэмнэ.
 const REQUIRED_API_KEY = process.env.API_KEY;
 app.use((req, res, next) => {
-    if (req.path === "/health") return next();
+    if (req.path === "/health" || req.path.startsWith("/u/")) return next(); // захиалагчийн файл илгээх хуудас (өөрийн токентой)
     if (!REQUIRED_API_KEY) return next(); // орчны хувьсагч тохируулаагүй бол шалгалтгүй (dev)
           const provided = req.header("x-api-key");
     if (provided !== REQUIRED_API_KEY) {

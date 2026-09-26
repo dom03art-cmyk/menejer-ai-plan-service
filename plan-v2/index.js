@@ -82,4 +82,5 @@ if (process.env.MAKE_RESTART_WEBHOOK && process.env.PLAN_MOCK !== "1") {
 }
 
 router.use(require("./files"));
+router.use(require("./upload"));
 module.exports = router;
