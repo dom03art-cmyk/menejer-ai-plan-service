@@ -110,6 +110,8 @@ function build(an) {
     sensitivity: an.sens.map(s => ({ case: s.name, change: s.change, dscr_y1: s.dscr1 ? +s.dscr1.toFixed(2) : null, npv: Math.round(s.npv) })),
     products: P.map(p => ({ key: p.key, name: p.name, price: p.price, net_price: Math.round(p.u.net), unit_cost: p.u.cogs, delivery: p.u.delivery, margin_pct: +((p.u.net - p.u.cogs - p.u.delivery) / p.u.net * 100).toFixed(1) })),
     staff: A.staff, capex: A.capex, orders_y1: Math.round(orders1), min_monthly_cash: Math.round(Math.min(...R.mc.map(x => x.cash))),
+    jobs_created: (A.staff || []).reduce((s, x) => s + (Number(x.count) || 0), 0),
+    taxes_by_year: Y.map((y, i) => ({ year: i + 1, income_tax: Math.round(y.tax || 0), social_insurance_employer: Math.round((A.staff || []).filter(s => (s.from_year || 1) <= i + 1).reduce((s, x) => s + x.count * x.gross * 12, 0) * (A.shi_rate || 0.125)) })),
     assumed_fields: A.assumed_fields || [], missing_info: A.missing_info || [],
   };
   return { blocks: X, charts: C, facts };
