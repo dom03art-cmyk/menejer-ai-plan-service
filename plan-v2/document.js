@@ -2,7 +2,8 @@
 const { Document, Packer, Paragraph, TextRun, HeadingLevel, Table, TableRow, TableCell, WidthType, ShadingType, AlignmentType,
   ImageRun, Header, Footer, PageNumber, TabStopType, LeaderType, TableOfContents } = require("docx");
 const OUTLINE = require("./outline");
-const NAVY = "1B2A4A", GOLD = "C9A227", GREY = "595959", LIGHT = "F3F0E6", W = 9300;
+let NAVY = "1B2A4A", GOLD = "C9A227", LIGHT = "F3F0E6", TOTFILL = "E8E0C4"; const GREY = "595959", W = 9300;
+function setTheme(t) { NAVY = t.primary; GOLD = t.accent; LIGHT = t.light; TOTFILL = t.tot; }
 const A4 = { width: 11906, height: 16838 }, MARGIN = { top: 1134, bottom: 1134, left: 1701, right: 850 };
 
 const FONT = "Times New Roman";
@@ -25,7 +26,7 @@ function table(b) {
   (b.rows || []).forEach((r, ri) => {
     const tot = String(r[0] ?? "").startsWith("!");
     const cells = Array.from({ length: n }, (_, i) => r[i] ?? "");
-    rows.push(new TableRow({ cantSplit: true, children: cells.map((c, i) => mk(i === 0 && tot ? String(c).slice(1) : c, i, { bold: tot, shade: tot ? "E8E0C4" : (ri % 2 ? "F6F4EE" : null), align: isText(c, i) ? AlignmentType.LEFT : AlignmentType.RIGHT })) }));
+    rows.push(new TableRow({ cantSplit: true, children: cells.map((c, i) => mk(i === 0 && tot ? String(c).slice(1) : c, i, { bold: tot, shade: tot ? TOTFILL : (ri % 2 ? "F6F4EE" : null), align: isText(c, i) ? AlignmentType.LEFT : AlignmentType.RIGHT })) }));
   });
   return new Table({ width: { size: W, type: WidthType.DXA }, columnWidths: widths, rows });
 }
@@ -134,4 +135,4 @@ async function buildDoc({ A, written, fin, charts, pages }) {
     ] });
   return { buffer: await Packer.toBuffer(doc), heads: ctx.heads, tables: ctx.tableNo };
 }
-module.exports = { buildDoc };
+module.exports = { setTheme, buildDoc };

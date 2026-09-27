@@ -5,8 +5,10 @@ const { build } = require("./fintables");
 const { research } = require("./research");
 const { writeAll } = require("./chapters");
 const { renderAll } = require("./charts");
-const { buildDoc } = require("./document");
-const { buildPdf } = require("./pdf");
+const { buildDoc, setTheme: setDocTheme } = require("./document");
+const { pickTheme } = require("./theme");
+let renderChain = Promise.resolve(); // өнгө нь модулийн түвшинд тул зураг/баримтыг нэг нэгээр нь угсарна
+const { buildPdf, setTheme: setPdfTheme } = require("./pdf");
 const { hasSoffice, findPages, qc, fbText, fbFile } = require("./util");
 const { usage } = require("./claude");
 const { review } = require("./feasibility");
@@ -52,24 +54,31 @@ async function runPipeline(job, log = console.log) {
     b.key = "llm" + (nChart++);
     llmSpecs[b.key] = { type: ["bar", "line", "pie"].includes(b.chart_type) ? b.chart_type : "bar", title: String(b.title || ""), labels, series: b.chart_type === "pie" ? series.slice(0, 1) : series };
   }
-  const charts = await renderAll({ ...fin.charts, ...llmSpecs });
-  step("6/7 Word угсарч байна");
-  let doc = await buildDoc({ A, written, fin, charts, pages: [] });
-  let text = null, nPages = null;
-  if (hasSoffice()) {
-    const fp = findPages(doc.buffer, doc.heads);
-    doc = await buildDoc({ A, written, fin, charts, pages: fp.pages });
-    text = fp.allText; nPages = fp.nPages;
-  } else {
-    doc = await buildDoc({ A, written, fin, charts, pages: null }); // Word "Update Field" гарчиг
-  }
-  job.qc = qc({ an, text, heads: doc.heads, written });
-  // Утсан дээр уншихад зориулсан PDF (гарчиг бодит хуудасны дугаартай)
-  try {
-    const pdf = await buildPdf({ A, written, fin, charts });
-    job.pdf = pdf.buffer;
-    nPages = nPages || (pdf.buffer.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
-  } catch (e) { log(`[${job.id}] PDF үүсгэж чадсангүй: ${e.message}`); job.qc.push("PDF үүсгэж чадсангүй"); }
+  const theme = pickTheme(A, job.conversation);
+  log(`[${job.id}] өнгөний загвар: ${theme.name}`);
+  let charts, doc, text = null, nPages = null;
+  const render = async () => {
+    setDocTheme(theme); setPdfTheme(theme); require("./charts").setTheme(theme);
+    charts = await renderAll({ ...fin.charts, ...llmSpecs });
+    step("6/7 Word угсарч байна");
+    doc = await buildDoc({ A, written, fin, charts, pages: [] });
+    if (hasSoffice()) {
+      const fp = findPages(doc.buffer, doc.heads);
+      doc = await buildDoc({ A, written, fin, charts, pages: fp.pages });
+      text = fp.allText; nPages = fp.nPages;
+    } else {
+      doc = await buildDoc({ A, written, fin, charts, pages: null }); // Word "Update Field" гарчиг
+    }
+    job.qc = qc({ an, text, heads: doc.heads, written });
+    // Утсан дээр уншихад зориулсан PDF (гарчиг бодит хуудасны дугаартай)
+    try {
+      const pdf = await buildPdf({ A, written, fin, charts });
+      job.pdf = pdf.buffer;
+      nPages = nPages || (pdf.buffer.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
+    } catch (e) { log(`[${job.id}] PDF үүсгэж чадсангүй: ${e.message}`); job.qc.push("PDF үүсгэж чадсангүй"); }
+
+  };
+  const run = renderChain.then(render); renderChain = run.catch(() => { }); await run;
   job.result = { pages: nPages, tables: doc.tables, headings: doc.heads.length, npv: Math.round(an.npv), irr: +(an.irr * 100).toFixed(1), dscr: an.R.dscr.slice(0, 3), usage: { ...usage }, seconds: Math.round((Date.now() - t0) / 1000), missing_info: A.missing_info || [], assumed: A.assumed_fields || [] };
   job.buffer = doc.buffer;
   step("7/7 илгээж байна");

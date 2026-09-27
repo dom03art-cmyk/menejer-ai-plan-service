@@ -26,6 +26,11 @@ router.post("/upload-link", express.json(), (req, res) => {
   res.json({ url: `${BASE}/u/${tokenFor(psid)}` });
 });
 
+// Үнэгүй "Бизнес төсөл бичих заавар" (нийтэд нээлттэй)
+const path = require("path");
+router.get("/guide.pdf", (req, res) => res.set({ "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=\"biznes-tusul-bichih-zaavar.pdf\"" }).sendFile(path.join(__dirname, "assets", "guide.pdf")));
+router.get("/guide.docx", (req, res) => res.set({ "Content-Disposition": "attachment; filename=\"biznes-tusul-bichih-zaavar.docx\"" }).sendFile(path.join(__dirname, "assets", "guide.docx")));
+
 router.get("/u/:token", (req, res) => {
   if (!verify(req.params.token)) return res.status(404).send("Холбоос буруу байна.");
   res.set("Content-Type", "text/html; charset=utf-8").send(PAGE);

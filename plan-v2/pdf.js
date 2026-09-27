@@ -7,7 +7,8 @@ const FD = path.dirname(require.resolve("@expo-google-fonts/tinos/package.json")
 pdfmake.setFonts({ DejaVu: { normal: FD + "400Regular/Tinos_400Regular.ttf", bold: FD + "700Bold/Tinos_700Bold.ttf", italics: FD + "400Regular_Italic/Tinos_400Regular_Italic.ttf", bolditalics: FD + "700Bold_Italic/Tinos_700Bold_Italic.ttf" } });
 pdfmake.setLocalAccessPolicy(p => p.startsWith(FD));
 pdfmake.setUrlAccessPolicy(() => false);
-const NAVY = "#1B2A4A", GOLD = "#C9A227", GREY = "#595959";
+let NAVY = "#1B2A4A", GOLD = "#C9A227", LIGHT = "#F3F0E6", ZEBRA = "#F6F4EE", TOTFILL = "#E8E0C4"; const GREY = "#595959";
+function setTheme(t) { NAVY = "#" + t.primary; GOLD = "#" + t.accent; LIGHT = "#" + t.light; ZEBRA = "#" + t.light; TOTFILL = "#" + t.tot; }
 
 const rich = (t) => String(t ?? "").split(/(\*\*[^*]+\*\*)/g).filter(Boolean).map(p => p.startsWith("**") ? { text: p.slice(2, -2), bold: true } : p);
 const isNum = (c) => /^[\s\-−—+]*[\d.,]+\s*(%|₮|×|жил|сая)?\s*$/.test(String(c));
@@ -21,7 +22,7 @@ function table(b, ctx) {
     const tot = String(r[0] ?? "").startsWith("!");
     body.push(Array.from({ length: n }, (_, i) => {
       let c = r[i] ?? ""; if (i === 0 && tot) c = String(c).slice(1);
-      return { text: String(c), bold: tot, fontSize: fs, alignment: i > 0 && isNum(c) ? "right" : "left", fillColor: tot ? "#E8E0C4" : ri % 2 ? "#F6F4EE" : null };
+      return { text: String(c), bold: tot, fontSize: fs, alignment: i > 0 && isNum(c) ? "right" : "left", fillColor: tot ? TOTFILL : ri % 2 ? ZEBRA : null };
     }));
   });
   ctx.tableNo++;
@@ -38,13 +39,13 @@ function blocks(list, ctx) {
     else if (b.type === "bullets") out.push({ ul: (b.items || []).map(rich), margin: [0, 0, 0, 6] });
     else if (b.type === "numbered") out.push({ ol: (b.items || []).map(rich), margin: [0, 0, 0, 6] });
     else if (b.type === "note") out.push({ text: b.text, italics: true, fontSize: 8.5, color: GREY, margin: [0, 2, 0, 10] });
-    else if (b.type === "box") out.push({ table: { widths: ["*"], body: [[{ stack: [{ text: b.title || "", bold: true, color: NAVY, margin: [0, 0, 0, 4] }, ...String(b.text || "").split("\n").map(t => ({ text: rich(t), alignment: "justify" }))], fillColor: "#F3F0E6", margin: [8, 6, 8, 6] }]] },
+    else if (b.type === "box") out.push({ table: { widths: ["*"], body: [[{ stack: [{ text: b.title || "", bold: true, color: NAVY, margin: [0, 0, 0, 4] }, ...String(b.text || "").split("\n").map(t => ({ text: rich(t), alignment: "justify" }))], fillColor: LIGHT, margin: [8, 6, 8, 6] }]] },
       layout: { hLineWidth: () => 0, vLineWidth: (i) => i === 0 ? 3 : 0, vLineColor: GOLD }, margin: [0, 4, 0, 10] });
     else if (b.type === "table" && Array.isArray(b.headers) && b.headers.length) out.push(...table(b, ctx));
     else if (b.type === "chart") { const c = ctx.charts[b.key]; if (c) { out.push({ image: "data:image/png;base64," + c.buf.toString("base64"), width: 400, alignment: "center", margin: [0, 6, 0, b.source ? 2 : 10] }); if (b.source) out.push({ text: `Эх сурвалж: ${b.source}`, italics: true, fontSize: 9, color: GREY, alignment: "center", margin: [0, 0, 0, 10] }); } }
     else if (b.type === "flow") {
       const steps = (b.steps || []).map(String).filter(Boolean).slice(0, 10); if (!steps.length) continue;
-      const box = (s, i) => ({ stack: [{ text: String(i + 1), bold: true, color: GOLD, alignment: "center" }, { text: s, fontSize: 9.5, alignment: "center" }], fillColor: "#F3F0E6", margin: [3, 4, 3, 4], border: [true, true, true, true] });
+      const box = (s, i) => ({ stack: [{ text: String(i + 1), bold: true, color: GOLD, alignment: "center" }, { text: s, fontSize: 9.5, alignment: "center" }], fillColor: LIGHT, margin: [3, 4, 3, 4], border: [true, true, true, true] });
       const per = steps.length <= 5 ? steps.length : Math.ceil(steps.length / 2);
       const stack = b.title ? [{ text: b.title, bold: true, color: NAVY, fontSize: 10.5, alignment: "center", margin: [0, 8, 0, 4] }] : [];
       for (let r = 0; r < steps.length; r += per) {
@@ -61,7 +62,7 @@ function blocks(list, ctx) {
       if (b.title) org.push({ text: b.title, bold: true, color: NAVY, fontSize: 10.5, alignment: "center", margin: [0, 8, 0, 4] });
       org.push({ columns: [{ width: "*", text: "" }, { width: 200, table: { widths: ["*"], body: [[{ text: String(b.head || "Гүйцэтгэх захирал").toUpperCase(), bold: true, color: "white", fillColor: NAVY, alignment: "center", margin: [0, 5, 0, 5] }]] }, layout: "noBorders" }, { width: "*", text: "" }] });
       org.push({ text: "↓", bold: true, color: GOLD, fontSize: 14, alignment: "center" });
-      org.push({ table: { widths: units.map(() => "*"), body: [units.map(u => ({ stack: [{ text: String(u.name || ""), bold: true, color: NAVY, alignment: "center", margin: [0, 0, 0, 3] }, ...(u.roles || []).map(r => ({ text: String(r), fontSize: 9, alignment: "center" }))], fillColor: "#F3F0E6", margin: [3, 5, 3, 5] }))] }, layout: { hLineColor: NAVY, vLineColor: NAVY } });
+      org.push({ table: { widths: units.map(() => "*"), body: [units.map(u => ({ stack: [{ text: String(u.name || ""), bold: true, color: NAVY, alignment: "center", margin: [0, 0, 0, 3] }, ...(u.roles || []).map(r => ({ text: String(r), fontSize: 9, alignment: "center" }))], fillColor: LIGHT, margin: [3, 5, 3, 5] }))] }, layout: { hLineColor: NAVY, vLineColor: NAVY } });
       out.push({ stack: org, unbreakable: true, margin: [0, 0, 0, 10] });
     }
   }
@@ -102,4 +103,4 @@ async function buildPdf({ A, written, fin, charts }) {
   const buffer = await pdfmake.createPdf(doc).getBuffer();
   return { buffer };
 }
-module.exports = { buildPdf };
+module.exports = { setTheme, buildPdf };

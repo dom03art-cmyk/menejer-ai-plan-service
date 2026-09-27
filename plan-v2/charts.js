@@ -1,5 +1,6 @@
 // Графикийг QuickChart.io-оор PNG болгоно. Амжилтгүй бол null (баримт бичиг графикгүй үргэлжилнэ).
-const COLORS = ["#1B2A4A", "#C9A227", "#2E6F9E", "#8B3E5E", "#6B6B6B"];
+let COLORS = ["#1B2A4A", "#C9A227", "#2E6F9E", "#8B3E5E", "#6B6B6B"];
+function setTheme(t) { COLORS = ["#" + t.primary, "#" + t.accent, "#2E6F9E", "#8B3E5E", "#6B6B6B"]; }
 async function render(spec, width = 800, height = 420) {
   const isPie = spec.type === "pie";
   const chart = {
@@ -15,4 +16,4 @@ async function render(spec, width = 800, height = 420) {
   } catch (e) { console.warn("[chart] " + spec.title + ": " + e.message); return null; }
 }
 async function renderAll(specs) { const out = {}; for (const [k, s] of Object.entries(specs)) out[k] = await render(s, s.type === "pie" ? 560 : 800, s.type === "pie" ? 420 : 420); return out; }
-module.exports = { renderAll };
+module.exports = { setTheme, renderAll };
