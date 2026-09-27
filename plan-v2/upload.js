@@ -26,6 +26,25 @@ router.post("/upload-link", express.json(), (req, res) => {
   res.json({ url: `${BASE}/u/${tokenFor(psid)}` });
 });
 
+
+// Нууцлалын бодлого ба мэдээлэл устгах заавар (Facebook App-ыг Live болгоход шаардлагатай)
+const LEGAL_CSS = "body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:760px;margin:0 auto;padding:28px 18px;line-height:1.6;color:#222}h1{color:#0B3A27}h2{color:#0B3A27;margin-top:28px}";
+router.get("/privacy", (req, res) => res.set("Content-Type", "text/html; charset=utf-8").send(`<!doctype html><html lang="mn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Менежер AI — Нууцлалын бодлого / Privacy Policy</title><style>${LEGAL_CSS}</style></head><body>
+<h1>Менежер AI — Нууцлалын бодлого</h1><p>Шинэчилсэн огноо: 2026-09-27</p>
+<p>Менежер AI нь Facebook Messenger-ээр дамжуулан бизнес төсөл боловсруулах үйлчилгээ үзүүлдэг. Энэхүү бодлого нь бид таны мэдээллийг хэрхэн цуглуулж, ашиглаж, хадгалдгийг тайлбарлана.</p>
+<h2>1. Цуглуулах мэдээлэл</h2><p>Facebook-ийн нэр, Messenger-ийн хэрэглэгчийн дугаар (PSID), таны бичсэн мессеж, илгээсэн файл (Word, Excel, PDF, зураг), пэйжийн пост дээр бичсэн коммент, төлбөрийн баримтын зураг.</p>
+<h2>2. Ашиглах зорилго</h2><p>Зөвхөн таны захиалсан бизнес төслийг боловсруулах, хүргэх, засварлах, төлбөр баталгаажуулах, үйлчилгээний чанарыг сайжруулах, таны хүссэн үнэгүй материалыг илгээх зорилгоор ашиглана. Мэдээллийг зар сурталчилгааны зорилгоор гуравдагч этгээдэд худалдахгүй.</p>
+<h2>3. Гуравдагч талын үйлчилгээ</h2><p>Үйлчилгээг үзүүлэхэд Meta (Facebook Messenger), Anthropic (Claude AI — төсөл бичих), Make.com (автоматжуулалт), Render (сервер), Google (захиалгын бүртгэл) үйлчилгээг ашигладаг. Эдгээр үйлчилгээ нь зөвхөн тухайн ажлыг гүйцэтгэх хэмжээнд мэдээлэл боловсруулна.</p>
+<h2>4. Хадгалах хугацаа</h2><p>Захиалгын мэдээллийг үйлчилгээ болон засвар хийхэд шаардлагатай хугацаанд (ихэвчлэн 12 сар хүртэл) хадгална. Таны хүсэлтээр өмнө нь устгана.</p>
+<h2>5. Таны эрх, мэдээлэл устгах</h2><p>Та өөрийн мэдээллийг харах, засах, устгуулах эрхтэй. Устгуулах хүсэлтийг Менежер AI пэйжийн Messenger-т «мэдээлэл устга» гэж бичиж эсвэл <a href="/data-deletion">энэ зааврын</a> дагуу илгээнэ үү. 7 хоногийн дотор устгана.</p>
+<h2>6. Холбоо барих</h2><p>Facebook: Менежер AI пэйжийн Messenger · Имэйл: dom03art@gmail.com</p>
+<hr><h1>Privacy Policy (English)</h1>
+<p>Менежер AI (Menejer AI) provides an automated business-plan writing service via Facebook Messenger. We collect your Facebook name, Page-scoped ID, messages, files you send, comments on our Page, and payment receipt images, solely to prepare, deliver and revise the business plan you ordered, verify payment, send materials you requested, and improve the service. We do not sell your data. Data is processed by Meta, Anthropic (Claude AI), Make.com, Render and Google only as needed to provide the service, and kept up to 12 months unless you request deletion. To request deletion, message our Page "delete my data" or follow the <a href="/data-deletion">data deletion instructions</a>. Contact: dom03art@gmail.com.</p>
+</body></html>`));
+router.get("/data-deletion", (req, res) => res.set("Content-Type", "text/html; charset=utf-8").send(`<!doctype html><html lang="mn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Менежер AI — Мэдээлэл устгах заавар</title><style>${LEGAL_CSS}</style></head><body>
+<h1>Мэдээлэл устгах заавар</h1><ol><li>Facebook дээр Менежер AI пэйжийн Messenger-ийг нээнэ.</li><li>«мэдээлэл устга» гэж бичиж илгээнэ.</li><li>Бид 7 хоногийн дотор таны захиалга, ярианы түүх, файлыг устгаж, Messenger-ээр мэдэгдэнэ.</li></ol><p>Эсвэл dom03art@gmail.com хаягаар Facebook нэрээ бичиж хүсэлт илгээнэ үү.</p>
+<h1>Data Deletion Instructions</h1><ol><li>Open Messenger with the Менежер AI Page.</li><li>Send the message "delete my data".</li><li>We delete your orders, conversation history and files within 7 days and confirm via Messenger.</li></ol><p>Or email dom03art@gmail.com with your Facebook name.</p></body></html>`));
+
 // Үнэгүй "Бизнес төсөл бичих заавар" (нийтэд нээлттэй)
 const path = require("path");
 router.get("/guide.pdf", (req, res) => res.set({ "Content-Type": "application/pdf", "Content-Disposition": "inline; filename=\"biznes-tusul-bichih-zaavar.pdf\"" }).sendFile(path.join(__dirname, "assets", "guide.pdf")));

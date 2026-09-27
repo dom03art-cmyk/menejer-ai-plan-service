@@ -13,7 +13,7 @@ app.use(express.json({ limit: "30mb" }));
 // "Headers" хэсэгт x-api-key нэмнэ.
 const REQUIRED_API_KEY = process.env.API_KEY;
 app.use((req, res, next) => {
-    if (req.path === "/health" || req.path.startsWith("/u/") || req.path.startsWith("/guide")) return next(); // захиалагчийн файл илгээх хуудас (өөрийн токентой)
+    if (req.path === "/health" || req.path.startsWith("/u/") || req.path.startsWith("/guide") || req.path === "/privacy" || req.path === "/data-deletion") return next(); // захиалагчийн файл илгээх хуудас (өөрийн токентой)
     if (!REQUIRED_API_KEY) return next(); // орчны хувьсагч тохируулаагүй бол шалгалтгүй (dev)
           const provided = req.header("x-api-key");
     if (provided !== REQUIRED_API_KEY) {
