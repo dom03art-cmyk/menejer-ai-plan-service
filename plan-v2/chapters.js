@@ -46,7 +46,11 @@ async function writeSection(item, ctx) {
 САНХҮҮГИЙН ТОО (кодоор тооцсон, эндээс иш тат):\n${JSON.stringify(ctx.facts)}
 ${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts) : ""}
 ${ctx.conversation ? "ЗАХИАЛАГЧИЙН ӨГСӨН МЭДЭЭЛЭЛ (яриа):\n" + ctx.conversation.slice(0, 12000) : ""}`;
-  const user = `БИЧИХ ХЭСГҮҮД:\n${outlineFor(item)}`;
+  let user = `БИЧИХ ХЭСГҮҮД:\n${outlineFor(item)}`;
+  if (ctx.revision) {
+    // Засвар: өмнөх хувилбарыг үндэс болгож, зөвхөн хүсэлтэд хамаарах хэсгийг өөрчилнө, санхүүгийн тоог шинэ тооноос авна
+    user += `\n\nЗАСВАРЫН ХҮСЭЛТ (заавал тусга):\n${ctx.revision.request}\n\nЭНЭ ХЭСГИЙН ӨМНӨХ ХУВИЛБАР (блокууд):\n${JSON.stringify(ctx.revision.previous || []).slice(0, 30000)}\n\nӨмнөх хувилбарыг үндэс болгож, засварын хүсэлтэд хамаарах агуулгыг шинэчил. Хүсэлтэд хамааралгүй сайн агуулгыг хадгал. Бүх тоог дээрх "САНХҮҮГИЙН ТОО"-оос дахин шалгаж, зөрсөн тоог шинэчил. Хэсгийг бүтнээр нь (доод үгийн тоог хангаж) буцаа.`;
+  }
   const out = await callJSON({ system: STYLE, cached, user, maxTokens: Number(process.env.PLAN_SECTION_MAX_TOKENS || 24000) });
   const sec = (out.sections || []).find(s => s.id === item.id) || (out.sections || [])[0];
   return sec ? sec.blocks || [] : [];

@@ -14,6 +14,90 @@ const { usage } = require("./claude");
 const { review } = require("./feasibility");
 const { checkRevisionScope } = require("./scope");
 
+
+const REV_MARK = "Засварын хүсэлт";
+const { loadPlan, savePlan } = require("./store");
+const { writeSection } = require("./chapters");
+const { callJSON } = require("./claude");
+const OUTLINE = require("./outline");
+
+function makeFin(an, rv, res) {
+  const fin = build(an);
+  fin.facts.feasibility = { viable: rv.viable, changes: rv.changes, reason: rv.reason || "" };
+  fin.sources = [...new Set([...(res.macro || []), ...(res.market || [])].map(x => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
+  if (!fin.sources.length) fin.sources = ["Захиалагчийн өгсөн мэдээлэл", "Төслийн санхүүгийн загвар"];
+  return fin;
+}
+
+// Шинэ төсөл: таамаглал → судалгаа → санхүү → бүх хэсэг
+async function runFull(job, step, log) {
+  step("1/7 таамаглал гаргаж байна");
+  const A0 = job.assumptions ? normalize(job.assumptions) : await extract(job.conversation);
+  step("2/7 судалгаа");
+  let res = { macro: [], market: [] };
+  try { res = await research(A0); } catch (e) { log(`[${job.id}] судалгаа амжилтгүй, судалгаагүй үргэлжилнэ: ${e.message}`); }
+  step("3/7 санхүүгийн загвар ба боломжийн шалгалт");
+  const rv = await review(A0, analyse(A0), res, job.conversation, (m) => log(`[${job.id}] ${m}`));
+  const fin = makeFin(rv.an, rv, res);
+  step("4/7 бүлгүүдийг бичиж байна");
+  const written = await writeAll({ A: rv.A, facts: fin.facts, research: res, conversation: job.conversation }, undefined, (g) => log(`[${job.id}]   ✓ ${g}`));
+  return { A: rv.A, an: rv.an, rv, res, written };
+}
+
+// Санхүүгийн тоо иш татдаг хэсгүүд — таамаглал өөрчлөгдвөл эдгээрийг заавал шинэчилнэ
+const FIN_DEPENDENT = ["1.1", "1.1.1", "1.2", "1.4", "2.3", "3.3", "3.5", "4.1", "4.2.1", "4.2.2", "4.2.3", "4.2.4", "4.2.5", "4.3", "4.4", "4.5", "5.2", "5.3", "B1", "B2"];
+const WRITABLE = OUTLINE.filter(o => o.group !== "static" && (o.words || o.guide));
+
+const PLANNER = `Чи бизнес төслийн засварын төлөвлөгч. Захиалагчийн засварын хүсэлтийг уншаад:
+1) Санхүүгийн загварын таамаглалд (үнэ, тоо хэмжээ, зардал, ажилтан, хөрөнгө оруулалт, зээлийн нөхцөл г.м.) өөрчлөлт хэрэгтэй бол ЗӨВХӨН өөрчлөх дээд түвшний талбаруудыг patch-д бүтнээр нь бич (жишээ нь "loan": {...}, "products": [...бүтэн жагсаалт]). Хэрэггүй бол patch = null.
+2) Текстийг нь дахин бичих шаардлагатай хэсгүүдийн id-г sections-д жагсаа (зөвхөн өгөгдсөн жагсаалтаас). Хүсэлт тодорхой хэсэгт хамаарахгүй, ерөнхий бол хамгийн их хамааралтай хэсгүүдийг сонго.
+3) Хүсэлт бүхэлд нь шинэчлэх (өөр бизнес, бүх бүлгийг дахин бич) шаардлагатай бол full_rewrite = true.
+Захиалагчийн тодорхой хэлсэн тоог яг тэр чигээр нь ашигла. Зөвхөн JSON:
+{"patch": {...}|null, "sections": ["2.4", "3.2"], "full_rewrite": false, "note": "Монгол хэлээр 1 өгүүлбэр — юу өөрчлөхийг"}`;
+
+async function runRevision(job, prev, step, log) {
+  const conv = job.conversation;
+  const last = conv.lastIndexOf(REV_MARK);
+  const request = conv.slice(last).slice(0, 4000);
+  // Өмнөх төслөөс хойш нэмэгдсэн мэдээлэл (шинэ файл, зураг г.м.)
+  const base = prev.conversation || "";
+  const newInfo = conv.startsWith(base) ? conv.slice(base.length, last).slice(-8000) : "";
+  step("1/5 засварын төлөвлөгөө");
+  const plan = await callJSON({ system: PLANNER, maxTokens: 16000,
+    user: `ЗАСВАРЫН ХҮСЭЛТ:\n${request}\n\n${newInfo ? "ШИНЭЭР ИЛГЭЭСЭН МЭДЭЭЛЭЛ:\n" + newInfo + "\n\n" : ""}ОДООГИЙН ТААМАГЛАЛ:\n${JSON.stringify(prev.A)}\n\nХЭСГҮҮДИЙН ЖАГСААЛТ:\n${WRITABLE.map(o => `${o.id} — ${o.t}`).join("\n")}` });
+  if (plan.full_rewrite) throw new Error("төлөвлөгч бүтэн шинэчлэл санал болгов");
+  const valid = new Set(WRITABLE.map(o => o.id));
+  let ids = (plan.sections || []).map(String).filter(id => valid.has(id));
+  let A = prev.A, rv = { A, an: analyse(A), changes: prev.rv?.changes || [], viable: prev.rv?.viable, reason: prev.rv?.reason };
+  if (plan.patch && typeof plan.patch === "object" && Object.keys(plan.patch).length) {
+    step("2/5 санхүүгийн загварыг шинэчилж байна");
+    const A1 = normalize({ ...A, ...plan.patch, loan: { ...A.loan, ...(plan.patch.loan || {}) } });
+    rv = await review(A1, analyse(A1), prev.res || { macro: [], market: [] }, conv, (m) => log(`[${job.id}] ${m}`));
+    A = rv.A;
+    ids = [...new Set([...ids, ...FIN_DEPENDENT])];
+  }
+  if (!ids.length) throw new Error("дахин бичих хэсэг тодорхойлогдсонгүй");
+  log(`[${job.id}] засвар: ${plan.note || ""} | хэсгүүд: ${ids.join(", ")}${plan.patch ? " | таамаглал өөрчлөгдсөн" : ""}`);
+  const fin = makeFin(rv.an, rv, prev.res || { macro: [], market: [] });
+  step(`3/5 ${ids.length} хэсгийг засаж байна`);
+  const written = { ...prev.written };
+  const items = WRITABLE.filter(o => ids.includes(o.id));
+  const ctx = { A, facts: fin.facts, research: prev.res || { macro: [], market: [] }, conversation: conv };
+  let k = 0;
+  async function worker() {
+    while (k < items.length) {
+      const item = items[k++];
+      try {
+        const blocks = await writeSection(item, { ...ctx, revision: { request, previous: prev.written[item.id] || [] } });
+        if (blocks.length) written[item.id] = blocks;
+        log(`[${job.id}]   ✓ ${item.id} засагдлаа`);
+      } catch (e) { if (/credit balance/i.test(e.message || "")) throw e; log(`[${job.id}]   ✗ ${item.id} засаж чадсангүй, өмнөхөөр үлдээв: ${e.message}`); }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(3, items.length) }, worker));
+  return { A, an: rv.an, rv, res: prev.res || { macro: [], market: [] }, written };
+}
+
 async function runPipeline(job, log = console.log) {
   const t0 = Date.now(); const step = (s) => { job.step = s; log(`[${job.id}] ${s} (${Math.round((Date.now() - t0) / 1000)}с)`); };
   // Засварын хүсэлт анхны сэдвийн хүрээнд эсэхийг шалгах
@@ -32,21 +116,23 @@ async function runPipeline(job, log = console.log) {
       const err = new Error("revision_out_of_scope"); err.status = "revision_rejected"; err.cleanedHistory = sc.cleanedHistory; throw err;
     }
   }
-  step("1/7 таамаглал гаргаж байна");
-  const A0 = job.assumptions ? normalize(job.assumptions) : await extract(job.conversation);
-  step("2/7 судалгаа");
-  let res = { macro: [], market: [] };
-  try { res = await research(A0); } catch (e) { log(`[${job.id}] судалгаа амжилтгүй, судалгаагүй үргэлжилнэ: ${e.message}`); }
-  step("3/7 санхүүгийн загвар ба боломжийн шалгалт");
-  const rv = await review(A0, analyse(A0), res, job.conversation, (m) => log(`[${job.id}] ${m}`));
-  const A = rv.A, an = rv.an;
-  const fin = build(an);
-  fin.facts.feasibility = { viable: rv.viable, changes: rv.changes, reason: rv.reason || "" };
+  // Засвар бол өмнөх төслийн төлөвийг ачаалж, зөвхөн хамааралтай хэсгүүдийг дахин бичнэ (бүтэн төсөл дахин бичихгүй)
+  let core = null;
+  if (job.conversation && job.psid && job.conversation.includes(REV_MARK) && process.env.PLAN_FULL_REVISION !== "1") {
+    const prev = await loadPlan(job.psid);
+    if (prev) {
+      try { core = await runRevision(job, prev, step, log); }
+      catch (e) { if (/credit balance/i.test(e.message || "")) throw e; log(`[${job.id}] хэсэгчилсэн засвар амжилтгүй, бүтэн төслөөр үргэлжилнэ: ${e.message}`); core = null; }
+    } else log(`[${job.id}] өмнөх төслийн төлөв олдсонгүй — бүтэн төслөөр засна`);
+  }
+  if (!core) core = await runFull(job, step, log);
+  const { A, an, rv, res } = core;
+  const written = { ...core.written };
+  const fin = makeFin(an, rv, res);
   job.feasibility = fin.facts.feasibility;
-  fin.sources = [...new Set([...res.macro, ...res.market].map(x => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
-  if (!fin.sources.length) fin.sources = ["Захиалагчийн өгсөн мэдээлэл", "Төслийн санхүүгийн загвар"];
-  step("4/7 бүлгүүдийг бичиж байна");
-  const written = await writeAll({ A, facts: fin.facts, research: res, conversation: job.conversation }, undefined, (g) => log(`[${job.id}]   ✓ ${g}`));
+  // Дараагийн засварт ашиглах төлөвийг хадгална (4.1-ийн анхааруулгын хайрцаггүйгээр)
+  if (job.psid && process.env.PLAN_MOCK !== "1") await savePlan(job.psid, { A, res, written, rv: { viable: rv.viable, changes: rv.changes, reason: rv.reason || "" }, conversation: job.conversation || "", savedAt: new Date().toISOString() });
+  if (rv.changes.length) written["4.1"] = [...(written["4.1"] || [])];
   // Анхааруулгыг баримт бичигт биш, зөвхөн захиалагчийн мессежид өгнө (банкинд очих баримтад дотоод анхааруулга үлдээхгүй)
   if (rv.changes.length) (written["4.1"] = written["4.1"] || []).push({ type: "box", title: "Боломжийн шалгалтаар шинэчилсэн таамаглал", text: rv.changes.map((c, i) => `${i + 1}. ${c}`).join("\n") });
   step("5/7 график");

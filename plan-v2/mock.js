@@ -12,6 +12,9 @@ function respond(user) {
       { type: "table", caption: `${id} туршилтын хүснэгт`, headers: ["Үзүүлэлт", "Утга", "Тайлбар"], rows: [["А", "1,000", "Жишээ"], ["!Нийт", "1,000", ""]] },
     ] })) });
   }
+  if (user.includes("ХЭСГҮҮДИЙН ЖАГСААЛТ")) {
+    return JSON.stringify({ patch: user.includes("ЗЭЭЛ") ? { loan: { amount: 50000000 } } : null, sections: ["2.4", "3.2"], full_rewrite: false, note: "туршилт" });
+  }
   if (user.includes("МАКРО") || user.includes("зах зээлийн судалгаа")) {
     return JSON.stringify({ facts: [{ topic: "economy", fact: "Туршилтын баримт", source: "Туршилтын эх сурвалж", date: "2026-07" }] });
   }
