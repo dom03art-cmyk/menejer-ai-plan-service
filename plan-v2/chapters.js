@@ -6,6 +6,8 @@ const STYLE = `Чи олон улсын түвшний бизнес төслий
 Дүрэм:
 - 3-р биеэр, албан хэлээр ("Тус компани ... хэрэгжүүлнэ"). Ярианы үг ("аль хэдийн", "их сайн") хэрэглэхгүй. Англи үг холихгүй (NPV, IRR, EBITDA, SWOT зэрэг товчлолоос бусад).
 - Тоо баримтыг ЗӨВХӨН өгөгдсөн "САНХҮҮГИЙН ТОО" болон "СУДАЛГААНЫ БАРИМТ"-аас ав. Өөрөө тоо зохиохгүй. Баримт байхгүй бол "тодорхой тоо олдсонгүй" гэж бич эсвэл чанарын үнэлгээ ашигла.
+- Англи нэр томьёог Монголоор бич, хаалтанд англи орчуулга БҮҮ нэм (жишээ нь "grace period" биш "үндсэн төлбөрийн хөнгөлөлтийн хугацаа", "payback" биш "нөхөгдөх хугацаа", "collateral" биш "барьцаа хөрөнгө"). Захиалагчийн өгсөн оноосон нэр (компани, газар, брэнд)-ийг яг тэр чигээр нь бич.
+- Санхүүжилтийн бүтцийг "САНХҮҮГИЙН ТОО"-ны loan_share_pct, own_share_pct, working_capital_reserve-ээс ав. Зээлийн хувь 80%-иас их бол зээлийн эрсдэлийг бууруулах арга хэмжээг (барьцаа хөрөнгө, нэмэлт өөрийн оролцоо, үе шаттай санхүүжилт) дурд. IRR 40%-иас их бол үр дүнг хэт магтахгүй, консерватив хувилбар ба таамаглалын эрсдэлийг онцол.
 - Хэсэг бүрт заасан доод үгийн тоог ХАНГА. Хураангуйлж товчлохыг ХОРИГЛОНО — дэлгэрэнгүй, гүнзгий, тоо баримттай бич.
 - Хэсгийн гарчгийг (өгөгдсөн id-ийн гарчиг) бүү давт — код өөрөө тавина. Дэд гарчиг хэрэгтэй бол "h3" блок ашигла.
 - Санхүүгийн хүснэгтүүдийг код оруулна гэж заасан бол тэдгээрийг давтаж бүү бич, зөвхөн тайлбар, дүгнэлт бич.
@@ -53,7 +55,33 @@ ${ctx.conversation ? "ЗАХИАЛАГЧИЙН ӨГСӨН МЭДЭЭЛЭЛ (яр
   }
   const out = await callJSON({ system: STYLE, cached, user, maxTokens: Number(process.env.PLAN_SECTION_MAX_TOKENS || 24000) });
   const sec = (out.sections || []).find(s => s.id === item.id) || (out.sections || [])[0];
-  return sec ? sec.blocks || [] : [];
+  return sec ? cleanBlocks(sec.blocks || []) : [];
+}
+
+// Англи нэр томьёог Монгол болгох (оноосон нэрэнд хүрэхгүй: зөвхөн мэдэгдэж буй нэр томьёо, жижиг үсгээр бичсэн хаалтан дахь англи үг)
+const EN_TERMS = ["grace period", "payback period", "payback", "collateral", "season", "place", "product", "price", "promotion", "people", "process", "physical evidence",
+  "cash flow", "break-even", "break even", "working capital", "net present value", "internal rate of return", "debt service coverage ratio", "feasibility", "stakeholder", "stakeholders",
+  "target market", "market share", "customer segment", "value proposition", "benchmark", "occupancy", "occupancy rate", "revenue", "profit", "strengths", "weaknesses", "opportunities", "threats", "capital expenditure", "operating expenses"];
+const EN_REPLACE = [[/\bgrace period\b/gi, "хөнгөлөлтийн хугацаа"], [/\bgrace\b(?=\s*\d)/gi, "хөнгөлөлтийн хугацаа"], [/\bpayback period\b/gi, "нөхөгдөх хугацаа"], [/\bpayback\b/gi, "нөхөгдөх хугацаа"],
+  [/\bcash flow\b/gi, "мөнгөн урсгал"], [/\bbreak-even\b/gi, "хугарлын цэг"], [/\bworking capital\b/gi, "эргэлтийн хөрөнгө"], [/\bcollateral\b/gi, "барьцаа хөрөнгө"]];
+function cleanStr(t) {
+  let s = t.replace(/\s*\(([A-Za-z][A-Za-z \-']*)\)/g, (m, inner) => {
+    const w = inner.trim().toLowerCase();
+    if (EN_TERMS.includes(w) || /^[a-z][a-z \-']*$/.test(inner.trim())) return "";
+    return m;
+  });
+  for (const [re, to] of EN_REPLACE) s = s.replace(re, to);
+  return s;
+}
+const SKIP_KEYS = new Set(["type", "chart_type", "key", "id"]);
+function cleanVal(v, k) {
+  if (typeof v === "string") return SKIP_KEYS.has(k) ? v : cleanStr(v);
+  if (Array.isArray(v)) return v.map(x => cleanVal(x, k));
+  if (v && typeof v === "object") { const o = {}; for (const [kk, vv] of Object.entries(v)) o[kk] = cleanVal(vv, kk); return o; }
+  return v;
+}
+function cleanBlocks(blocks) {
+  try { return blocks.map(b => cleanVal(b)); } catch (e) { return blocks; }
 }
 
 // Хэсгүүдийг хязгаартай зэрэгцээгээр бичнэ; хураангуй (ch1) хамгийн сүүлд
@@ -82,4 +110,4 @@ async function writeAll(ctx, concurrency = Number(process.env.PLAN_CONCURRENCY |
   if (still.length > 2) throw new Error(`Хоосон хэсэг хэт олон (${still.join(", ")}) — дутуу төсөл илгээхгүй`);
   return result;
 }
-module.exports = { writeAll, writeSection };
+module.exports = { writeAll, writeSection, cleanBlocks, cleanStr };

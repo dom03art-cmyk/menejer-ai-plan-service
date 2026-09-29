@@ -6,8 +6,12 @@ const T = (caption, headers, rows, left) => ({ type: "table", caption, headers, 
 
 function build(an) {
   const { A, R } = an, Y = R.years, BS = R.bs, CF = R.cfs, SC = R.sched;
-  const total = R.capexTotal + A.init_inventory + R.launch + R.inkindTotal + (A.cash_equity || 0);
   const own = R.inkindTotal + (A.cash_equity || 0);
+  const reserve = R.reserve ?? R.launch ?? 0;
+  const usesTotal = R.capexTotal + A.init_inventory + reserve + R.inkindTotal;
+  const srcTotal = A.loan.amount + own;
+  const gap = Math.max(0, usesTotal - srcTotal); // зарцуулалт эх үүсвэрээс хэтэрвэл нэмэлт санхүүжилт шаардлагатай
+  const total = Math.max(usesTotal, srcTotal);
   const row = (label, fn) => [label, ...Y.map(y => m1(fn(y)))];
   const loanY = (y) => SC.slice(y * 12, y * 12 + 12);
   const pay = payroll(A.staff, A.er_si);
@@ -27,10 +31,18 @@ function build(an) {
     ["DSCR (1/2/3-р жил)", R.dscr.slice(0, 3).map(d => d ? d.toFixed(2) : "—").join(" / ")],
   ], [1])];
   X.fundingTable = [T("Хөрөнгийн эх үүсвэр ба зарцуулалт", ["Ангилал", "Дүн (₮)", "Хувь"], [
-    ["Үндсэн хөрөнгө (CAPEX)", f(R.capexTotal), pc(R.capexTotal / total)], ["Эргэлтийн хөрөнгө (анхны нөөц)", f(A.init_inventory), pc(A.init_inventory / total)],
-    ...(R.launch > 0 ? [["Нээлтийн маркетинг / эргэлтийн мөнгө", f(R.launch), pc(R.launch / total)]] : []),
-    ...(own > 0 ? [["Өөрийн хөрөнгийн оролцоо", f(own), pc(own / total)]] : []),
-    ["!Нийт төслийн өртөг", f(total), "100%"]])];
+    ["!ЭХ ҮҮСВЭР", "", ""],
+    ["Банкны зээл", f(A.loan.amount), pc(A.loan.amount / total)],
+    ...((A.cash_equity || 0) > 0 ? [["Өөрийн мөнгөн хөрөнгө", f(A.cash_equity), pc(A.cash_equity / total)]] : []),
+    ...(R.inkindTotal > 0 ? [["Өөрийн хөрөнгийн оролцоо (эд хөрөнгөөр)", f(R.inkindTotal), pc(R.inkindTotal / total)]] : []),
+    ...(gap > 0 ? [["Нэмэлт санхүүжилт шаардлагатай", f(gap), pc(gap / total)]] : []),
+    ["!Нийт эх үүсвэр", f(total), "100%"],
+    ["!ЗАРЦУУЛАЛТ", "", ""],
+    ["Үндсэн хөрөнгө (CAPEX)", f(R.capexTotal), pc(R.capexTotal / total)],
+    ...(A.init_inventory > 0 ? [["Түүхий эд, барааны анхны нөөц", f(A.init_inventory), pc(A.init_inventory / total)]] : []),
+    ...(reserve > 0 ? [["Эргэлтийн мөнгөний нөөц", f(reserve), pc(reserve / total)]] : []),
+    ...(R.inkindTotal > 0 ? [["Төсөлд оруулж буй өөрийн эд хөрөнгө", f(R.inkindTotal), pc(R.inkindTotal / total)]] : []),
+    ["!Нийт зарцуулалт (төслийн нийт өртөг)", f(total), "100%"]])];
   X.kpiTable = [T("Үндсэн үзүүлэлтүүд, сая ₮", ["Үзүүлэлт", ...yrH], [row("Борлуулалтын орлого", y => y.rev), row("Нийт ашиг", y => y.gross), row("EBITDA", y => y.ebitda), row("Цэвэр ашиг", y => y.ni), row("Зээлийн төлбөр", y => y.ds), ["DSCR", ...R.dscr.map(d => d ? d.toFixed(2) : "зээлгүй")]])];
   X.unitTable = [T("Нэгж бүтээгдэхүүний эдийн засаг (1-р жил, ₮)", ["Бүтээгдэхүүн", "Үнэ (НӨАТ-тэй)", "Цэвэр үнэ", "Өртөг", "Хүргэлт", "Нэгжийн ашиг", "Маржин"],
     P.map(p => [p.name, f(p.price), f(p.u.net), f(p.u.cogs), f(p.u.delivery), f(p.u.net - p.u.cogs - p.u.delivery), pc((p.u.net - p.u.cogs - p.u.delivery) / p.u.net)])),
@@ -51,7 +63,7 @@ function build(an) {
     { type: "note", text: `Ажил олгогчийн НДШ ${pc(A.er_si)}, ажилтны 11.5%, ХХОАТ 10%. Цалин жил бүр ${pc(A.fixed_growth, 0)}-иар өснө.` }];
   X.capexTable = [T("Үндсэн хөрөнгө (CAPEX)", ["Хөрөнгө", "Тоо", "Нэгжийн үнэ (₮)", "Нийт (₮)", "Хугацаа"], [...A.capex.map(c => [c.name, c.qty, f(c.unit_price), f(c.qty * c.unit_price), `${c.life} жил`]), ["!Нийт", "", "", f(R.capexTotal), ""]])];
   X.inkindTable = (A.inkind || []).length ? [T("Өөрийн хөрөнгийн оролцоо (эд хөрөнгөөр)", ["Хөрөнгө", "Үнэлгээ (₮)", "Хугацаа"], [...A.inkind.map(c => [c.name, f(c.value), `${c.life} жил`]), ["!Нийт", f(R.inkindTotal), ""]])] : [];
-  X.opexTable = [T("Эргэлтийн хөрөнгө (OPEX)", ["Зүйл", "Дүн (₮)"], [["Түүхий эдийн анхны нөөц", f(A.init_inventory)], ...(R.launch > 0 ? [["Нээлтийн маркетинг / эргэлтийн мөнгө", f(R.launch)]] : []), ["!Нийт", f(A.init_inventory + R.launch)]])];
+  X.opexTable = [T("Эргэлтийн хөрөнгө", ["Зүйл", "Дүн (₮)"], [["Түүхий эдийн анхны нөөц", f(A.init_inventory)], ...(reserve > 0 ? [["Эргэлтийн мөнгөний нөөц", f(reserve)]] : []), ["!Нийт", f(A.init_inventory + reserve)]])];
   X.assumptionTable = [T("Таамаглалын хуудас", ["Хувьсагч", "Утга", "Эх сурвалж"], [
     ...P.map(p => [`${p.name} — үнэ / өртөг`, `${f(p.price)} ₮ / ${f(p.u.cogs)} ₮`, (A.assumed_fields || []).some(s => s.includes(p.key)) ? "Таамаглал" : "Захиалагч"]),
     ["Үнийн / хувьсах / тогтмол зардлын өсөлт", `${pc(A.price_growth, 0)} / ${pc(A.varcost_growth, 0)} / ${pc(A.fixed_growth, 0)}`, "Инфляцын төлөв"],
@@ -103,7 +115,8 @@ function build(an) {
 
   // AI-д өгөх товч тоон мэдээлэл (AI тоо зохиохгүй, эндээс иш татна)
   const facts = {
-    total_project: total, loan: A.loan, own_equity: own, monthly_payment_after_grace: SC.length ? Math.round(SC[Math.min(SC.length - 1, A.loan.grace_months || 0)].pay) : 0, grace_interest_only_payment: (A.loan.grace_months || 0) > 0 ? Math.round(SC[0].pay) : null,
+    total_project: total, loan: A.loan, own_equity: own, working_capital_reserve: Math.round(reserve), funding_gap: Math.round(gap),
+    loan_share_pct: +(A.loan.amount / total * 100).toFixed(1), own_share_pct: +(own / total * 100).toFixed(1), monthly_payment_after_grace: SC.length ? Math.round(SC[Math.min(SC.length - 1, A.loan.grace_months || 0)].pay) : 0, grace_interest_only_payment: (A.loan.grace_months || 0) > 0 ? Math.round(SC[0].pay) : null,
     years: Y.map((y, i) => ({ year: i + 1, revenue: Math.round(y.rev), gross: Math.round(y.gross), ebitda: Math.round(y.ebitda), net_income: Math.round(y.ni), debt_service: Math.round(y.ds), dscr: R.dscr[i] ? +R.dscr[i].toFixed(2) : null, units: Object.fromEntries(Object.entries(y.units).map(([k, v]) => [k, Math.round(v)])), marketing: Math.round(y.mkt) })),
     npv: Math.round(an.npv), irr: +(an.irr * 100).toFixed(1), payback_years: an.pb ? +an.pb.toFixed(2) : null, bep_revenue_y1: Math.round(an.bep.revenue), grace6_dscr_y1: an.grace6 ? +an.grace6.toFixed(2) : null,
     scenarios: Object.fromEntries(SK.map(k => [k, { rev_y1: Math.round(S[k].rev[0]), dscr: S[k].dscr.map(d => d ? +d.toFixed(2) : null), npv: Math.round(S[k].npv) }])),

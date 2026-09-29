@@ -183,6 +183,13 @@ async function runPipeline(job, log = console.log) {
     await fbFile(job.psid, doc.buffer, fname);
     const adj = rv.changes.length ? `\n\n🔧 Санхүүгийн тооцоог бодит зах зээлийн түвшинд тааруулахын тулд дараах таамаглалыг өөрчилсөн (4.1-р хэсэгт дэлгэрэнгүй):\n${rv.changes.slice(0, 6).map((c, i) => `${i + 1}. ${c}`).join("\n")}` : "";
     const warn = rv.viable ? "" : `\n\n❗ Анхааруулга: Таны өгсөн мэдээллээр төсөл банкны шаардлагыг (зээл төлөх чадвар, ашигт ажиллагаа) хангахгүй гарсан. ${rv.reason || ""} Үнэ, борлуулалтын хэмжээ, зардал, зээлийн нөхцөлөө бодитоор шалгаад «засвар хийлгэх» сонголтоор дахин боловсруулуулна уу.`;
+    let advice = "";
+    try {
+      const own = (an.R.inkindTotal || 0) + (A.cash_equity || 0), L = A.loan.amount || 0;
+      const share = L > 0 ? L / (L + own) : 0;
+      if (share > 0.8) advice += `\n\n📌 Зээлийн хувь төслийн нийт өртгийн ${Math.round(share * 100)}% байна. Банкууд ихэвчлэн 20-30%-ийг өөрийн хөрөнгөөр (мөнгө, эд хөрөнгө) оролцуулахыг шаарддаг. Нэмэлт өөрийн оролцоо, барьцаа хөрөнгөө банктайгаа урьдчилан ярилцаарай.`;
+      if (an.irr > 0.40 || (an.pb !== null && an.pb < 2.5)) advice += `\n\n📌 Санхүүгийн үр дүн өндөр гарсан (IRR ${(an.irr * 100).toFixed(0)}%, хөрөнгө оруулалт ${an.pb ? an.pb.toFixed(1) : "—"} жилд нөхөгдөнө). Банк үүнийг сайтар шалгана — барилга, тоног төхөөрөмжийн өртөг, борлуулалтын тоо, үнээ бодит эсэхийг дахин нягтална уу.`;
+    } catch (e) { advice = ""; }
     const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
     await fbText(job.psid, `✅ Таны бизнес төсөл бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.
 
@@ -191,7 +198,7 @@ async function runPipeline(job, log = console.log) {
 2. «[Захиалагч бөглөнө]» гэж тэмдэглэсэн хэсгүүдийг (регистр, хаяг, барьцаа хөрөнгө г.м.) нөхөж бичих.
 3. 4-р бүлгийн «Таамаглалын хуудас»-нд «Таамаглал» гэж тэмдэглэсэн тоонуудыг өөрийн бодит тоогоор солих.${missing}
 
-Таны өгсөн мэдээлэл хэдий чинээ дэлгэрэнгүй, бодит байна төдий чинээ төсөл үнэн зөв гарна.${adj}${warn}`);
+Таны өгсөн мэдээлэл хэдий чинээ дэлгэрэнгүй, бодит байна төдий чинээ төсөл үнэн зөв гарна.${adj}${warn}${advice}`);
   }
   if (process.env.MAKE_DONE_WEBHOOK && process.env.PLAN_MOCK !== "1") {
     await fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "done", ...job.result, qc: job.qc }) }).catch(e => log("webhook алдаа " + e.message));

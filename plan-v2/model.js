@@ -31,7 +31,9 @@ function run(A, o = {}) {
   const sched = loanSchedule(L, r, A.loan.months, grace);
   const capexTotal = A.capex.reduce((a, c) => a + c.qty * c.unit_price, 0);
   const inkindTotal = (A.inkind || []).reduce((a, c) => a + c.value, 0);
-  const launch = Math.max(0, L - capexTotal - A.init_inventory);
+  // Зээл + мөнгөн өөрийн хөрөнгөөс CAPEX, анхны нөөцийг хассан үлдэгдэл = эргэлтийн мөнгөний нөөц (зардал БИШ, кассанд үлдэнэ)
+  const reserve = Math.max(0, L + (A.cash_equity || 0) - capexTotal - A.init_inventory);
+  const launch = reserve; // хуучин нэртэй нийцтэй байлгах
   const erSi = A.er_si ?? 0.135;
   const years = [], months = [];
   const sSum = A.season.reduce((a, b) => a + b, 0);
@@ -50,7 +52,6 @@ function run(A, o = {}) {
     const staffCost = A.staff.filter(s => (s.from_year || 1) <= y + 1).reduce((a, s) => a + s.count * s.gross, 0) * (1 + erSi) * 12 * fg;
     const fx = { "Цалин, НДШ (тогтмол ажилтан)": staffCost };
     for (const [k, v] of Object.entries(A.fixed_monthly)) fx[k] = v * 12 * fg;
-    if (y === 0 && launch > 0) fx["Нээлтийн маркетингийн кампанит ажил"] = launch;
     Y.fixed = fx; Y.fixed_tot = Object.values(fx).reduce((a, b) => a + b, 0);
     Y.gross = Y.rev - Y.cogs;
     Y.ebitda = Y.gross - Y.deliv - Y.fees - Y.mkt - Y.fixed_tot;
@@ -93,21 +94,22 @@ function run(A, o = {}) {
   });
   for (const b of bs) { b.assets = b.cash + b.inv + b.fa; b.le = b.loan_cur + b.loan_lt + b.eq + b.re; b.diff = b.assets - b.le; }
   // NPV/IRR нь ШИНЭ хөрөнгө оруулалтад (зээл + мөнгөн өөрийн хөрөнгө) суурилна; одоо эзэмшиж буй хөрөнгө (inkind) нь өмнө нь гарсан зардал тул тооцохгүй
-  const inv0 = capexTotal + A.init_inventory + (A.cash_equity || 0);
+  // Эргэлтийн мөнгөний нөөц нь эхэнд гарах хөрөнгө оруулалт бөгөөд 5-р жилийн эцэст буцаж чөлөөлөгдөнө
+  const inv0 = capexTotal + A.init_inventory + reserve;
   const fcf = [-inv0];
-  years.forEach((Y, y) => { let f = Y.ebitda - Y.tax - Y.capex_extra - cfs[y].dinv; if (y === 4) f += Y.inv_end; fcf.push(f); });
+  years.forEach((Y, y) => { let f = Y.ebitda - Y.tax - Y.capex_extra - cfs[y].dinv; if (y === 4) f += Y.inv_end + reserve; fcf.push(f); });
   const dscr = years.map(Y => Y.ds > 0 ? (Y.ebitda - Y.tax) / Y.ds : null);
   // monthly cash (3 years)
   const mc = []; let mcash = bs[0].cash;
   months.forEach((m, i) => {
     const Y = years[m.y - 1];
     const variable = (Y.cogs + Y.deliv + Y.fees + Y.mkt) * m.w;
-    const fixed = (Y.fixed_tot - (m.y === 1 ? launch : 0)) / 12 + (i === 0 ? launch : 0);
+    const fixed = Y.fixed_tot / 12;
     const debt = sched[i] ? sched[i].pay : 0;
     const net = m.rev - variable - fixed - Y.tax * m.w - debt; mcash += net;
     mc.push({ label: m.label, rev: m.rev, variable, fixed, debt, net, cash: mcash });
   });
-  return { years, months, sched, bs, cfs, fcf, dscr, inv0, capexTotal, inkindTotal, launch, mc };
+  return { years, months, sched, bs, cfs, fcf, dscr, inv0, capexTotal, inkindTotal, launch, reserve, mc };
 }
 
 const npv = (r, cf) => cf.reduce((a, c, i) => a + c / Math.pow(1 + r, i), 0);
