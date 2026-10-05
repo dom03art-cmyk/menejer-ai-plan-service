@@ -9,6 +9,8 @@ const DEFAULTS = {
   init_inventory: 0, capex: [], inkind: [], extra_capex: [], staff: [], fixed_monthly: {}, cash_equity: 0,
 };
 
+const DEFAULT_CONTINGENCY = Math.min(0.3, Math.max(0, Number(process.env.PLAN_CONTINGENCY_RATE ?? 0.10))) || 0;
+
 const SCHEMA = `{
  "company": {"name","reg_no","address","contact_name","phone","founded","core_business","industry"},
  "project": {"title","location","funder","funder_type":"bank|investor","description"},
@@ -60,6 +62,9 @@ function normalize(A) {
     out.init_inventory = Math.max(0, out.loan.amount + (out.cash_equity || 0) - capexTotal);
     (out.assumed_fields = out.assumed_fields || []).push("init_inventory (эх үүсвэрт тааруулж багасгав)");
   }
+  // Нөөц төсөв: анхдагч 10% (0–30%). Утгыг зөвхөн код тогтооно.
+  out.contingency_rate = Math.min(0.3, Math.max(0, Number(out.contingency_rate ?? DEFAULT_CONTINGENCY)));
+  if (!isFinite(out.contingency_rate)) out.contingency_rate = DEFAULT_CONTINGENCY;
   out.start_year = out.start_year || 2026;
   out.start_month_index = out.start_month_index ?? new Date().getMonth() + 1;
   return out;

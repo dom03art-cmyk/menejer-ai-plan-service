@@ -95,6 +95,29 @@ if (process.env.MAKE_RESTART_WEBHOOK && process.env.PLAN_MOCK !== "1") {
   }, 15000).unref();
 }
 
+// Томьёотой Excel санхүүгийн загвар (нэмэлт үйлчилгээ). Үндсэн урсгалаас тусдаа: энд алдаа гарсан ч төсөл бичих ажилд нөлөөлөхгүй.
+// body: { psid } (хадгалсан төслөөс) эсвэл { assumptions } ; send:true бол Messenger-ээр илгээнэ (to: өөр хүлээн авагчийн PSID).
+// send байхгүй бол файлыг хариунд буцаана. Тооцоо системийнхтэй зөрвөл 422 буцааж, файл ИЛГЭЭХГҮЙ.
+router.post("/jobs/xlsx", express.json({ limit: "2mb" }), auth, async (req, res) => {
+  try {
+    const { psid, assumptions, send, to } = req.body || {};
+    const { makeModel } = require("./xlsxModel"); const { analyse } = require("./model"); const { normalize } = require("./intake"); const { loadPlan } = require("./store");
+    let A = assumptions ? normalize(assumptions) : null;
+    if (!A && psid) { const st = await loadPlan(psid); A = st && st.A; if (A && A.contingency_rate === undefined) A.contingency_rate = 0; } // хуучин төсөлд нөөц төсөв нэмэхгүй — хүргэсэн Word-той тоо таарна
+    if (!A) return res.status(404).json({ ok: false, error: "Энэ захиалагчийн хадгалсан төсөл олдсонгүй" });
+    const m = await makeModel(A, analyse(A));
+    if (!m.ok) { console.warn("[xlsx] шалгалт унав", JSON.stringify(m.bad.slice(0, 5))); return res.status(422).json({ ok: false, error: "Excel-ийн тооцоо системийн тооцоотой таарсангүй — файл илгээгээгүй", bad: m.bad.slice(0, 10) }); }
+    const company = String(A.company?.name || "").replace(/[«»"\\/:*?<>|]/g, "").trim().slice(0, 40);
+    const filename = `Санхүүгийн загвар${company ? " - " + company : ""}.xlsx`, mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    if (send) {
+      const { fbFile } = require("./util"); await fbFile(to || psid, m.buffer, filename, mime);
+      console.log(`[xlsx] ${to || psid} руу илгээлээ (${m.formulas} томьёо, ${m.total} шалгалт)`);
+      return res.json({ ok: true, sent_to: to || psid, filename, formulas: m.formulas, checks: m.total });
+    }
+    res.set({ "Content-Type": mime, "Content-Disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}` }).send(m.buffer);
+  } catch (e) { console.warn("[xlsx]", e.message); res.status(500).json({ ok: false, error: String(e.message).slice(0, 300) }); }
+});
+
 router.use(require("./files"));
 router.use(require("./upload"));
 module.exports = router;

@@ -45,7 +45,7 @@ async function runFull(job, step, log) {
 }
 
 // Санхүүгийн тоо иш татдаг хэсгүүд — таамаглал өөрчлөгдвөл эдгээрийг заавал шинэчилнэ
-const FIN_DEPENDENT = ["1.1", "1.1.1", "1.2", "1.4", "2.3", "3.3", "3.5", "4.1", "4.2.1", "4.2.2", "4.2.3", "4.2.4", "4.2.5", "4.3", "4.4", "4.5", "5.2", "5.3", "B1", "B2"];
+const FIN_DEPENDENT = ["1.1", "1.1.1", "1.2", "1.4", "2.3", "3.3", "3.5", "3.6", "4.1", "4.2.1", "4.2.2", "4.2.3", "4.2.4", "4.2.5", "4.3", "4.4", "4.5", "5.2", "5.3", "B1", "B2"];
 const WRITABLE = OUTLINE.filter(o => o.group !== "static" && (o.words || o.guide));
 
 const PLANNER = `Чи бизнес төслийн засварын төлөвлөгч. Захиалагчийн засварын хүсэлтийг уншаад:
@@ -57,6 +57,8 @@ const PLANNER = `Чи бизнес төслийн засварын төлөвл�
 
 async function runRevision(job, prev, step, log) {
   const conv = job.conversation;
+  // Нөөц төсөв нэмэгдэхээс өмнө хүргэсэн төсөл: засварын үед тоо өөрчлөгдөхгүй байхаар 0 хэвээр үлдээнэ
+  if (prev.A && prev.A.contingency_rate === undefined) prev.A.contingency_rate = 0;
   const last = conv.lastIndexOf(REV_MARK);
   const request = conv.slice(last).slice(0, 4000);
   // Өмнөх төслөөс хойш нэмэгдсэн мэдээлэл (шинэ файл, зураг г.м.)
@@ -168,6 +170,14 @@ async function runPipeline(job, log = console.log) {
       job.pdf = pdf.buffer;
       nPages = nPages || (pdf.buffer.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
     } catch (e) { log(`[${job.id}] PDF үүсгэж чадсангүй: ${e.message}`); job.qc.push("PDF үүсгэж чадсангүй"); }
+    // Томьёотой Excel санхүүгийн загвар (үнэгүй дагалдана). Тооцоо системийнхтэй бүрэн таарсан үед л илгээнэ; алдаа гарвал PDF/Word-д нөлөөлөхгүй.
+    job.xlsx = null;
+    if (process.env.PLAN_XLSX !== "0") {
+      try {
+        const m = await require("./xlsxModel").makeModel(A, an);
+        if (m.ok) job.xlsx = m.buffer; else { log(`[${job.id}] Excel загвар шалгалтад тэнцээгүй — илгээхгүй: ${JSON.stringify(m.bad.slice(0, 3))}`); job.qc.push("Excel загвар шалгалтад тэнцээгүй — илгээгээгүй"); }
+      } catch (e) { log(`[${job.id}] Excel загвар үүсгэж чадсангүй: ${e.message}`); }
+    }
 
   };
   const run = renderChain.then(render); renderChain = run.catch(() => { }); await run;
@@ -181,17 +191,20 @@ async function runPipeline(job, log = console.log) {
   if (job.psid && process.env.PLAN_MOCK !== "1") {
     if (job.pdf) await fbFile(job.psid, job.pdf, fname.replace(/\.docx$/, ".pdf"), "application/pdf");
     await fbFile(job.psid, doc.buffer, fname);
+    let xlsxSent = false;
+    if (job.xlsx) { try { await fbFile(job.psid, job.xlsx, fname.replace(/-biznes-tusul-/, "-sankhuugiin-zagvar-").replace(/\.docx$/, ".xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); xlsxSent = true; } catch (e) { log(`[${job.id}] Excel илгээж чадсангүй: ${e.message}`); } }
     const adj = rv.changes.length ? `\n\n🔧 Санхүүгийн тооцоог бодит зах зээлийн түвшинд тааруулахын тулд дараах таамаглалыг өөрчилсөн (4.1-р хэсэгт дэлгэрэнгүй):\n${rv.changes.slice(0, 6).map((c, i) => `${i + 1}. ${c}`).join("\n")}` : "";
     const warn = rv.viable ? "" : `\n\n❗ Анхааруулга: Таны өгсөн мэдээллээр төсөл банкны шаардлагыг (зээл төлөх чадвар, ашигт ажиллагаа) хангахгүй гарсан. ${rv.reason || ""} Үнэ, борлуулалтын хэмжээ, зардал, зээлийн нөхцөлөө бодитоор шалгаад «засвар хийлгэх» сонголтоор дахин боловсруулуулна уу.`;
     let advice = "";
     try {
-      const own = (an.R.inkindTotal || 0) + (A.cash_equity || 0), L = A.loan.amount || 0;
+      const own = (an.R.inkindTotal || 0) + (A.cash_equity || 0) + (an.R.contingency || 0), L = A.loan.amount || 0;
       const share = L > 0 ? L / (L + own) : 0;
       if (share > 0.8) advice += `\n\n📌 Зээлийн хувь төслийн нийт өртгийн ${Math.round(share * 100)}% байна. Банкууд ихэвчлэн 20-30%-ийг өөрийн хөрөнгөөр (мөнгө, эд хөрөнгө) оролцуулахыг шаарддаг. Нэмэлт өөрийн оролцоо, барьцаа хөрөнгөө банктайгаа урьдчилан ярилцаарай.`;
+      if ((an.R.contingency || 0) > 0) advice += `\n\n📌 Гэнэтийн зардлын нөөц төсөв ${Math.round(an.R.contingency).toLocaleString("en-US")} ₮ (шинэ үндсэн хөрөнгийн ${Math.round((an.R.contRate || 0) * 100)}%)-ийг зээлээс бус өөрийн хөрөнгөөс гаргахаар тооцсон. Энэ мөнгийг бэлдэх боломжоо шалгаарай.`;
       if (an.irr > 0.40 || (an.pb !== null && an.pb < 2.5)) advice += `\n\n📌 Санхүүгийн үр дүн өндөр гарсан (IRR ${(an.irr * 100).toFixed(0)}%, хөрөнгө оруулалт ${an.pb ? an.pb.toFixed(1) : "—"} жилд нөхөгдөнө). Банк үүнийг сайтар шалгана — барилга, тоног төхөөрөмжийн өртөг, борлуулалтын тоо, үнээ бодит эсэхийг дахин нягтална уу.`;
     } catch (e) { advice = ""; }
     const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
-    await fbText(job.psid, `✅ Таны бизнес төсөл бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.
+    await fbText(job.psid, `✅ Таны бизнес төсөл бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.${xlsxSent ? "\n📊 Excel файл нь томьёотой санхүүгийн загвар: «Таамаглал» хуудасны шар нүдийг өөрчлөхөд бүх тооцоо автоматаар шинэчлэгдэнэ." : ""}
 
 ⚠️ Чухал сануулга: Энэ төслийг таны өгсөн мэдээлэл болон нээлттэй эх сурвалжийн судалгаанд үндэслэн хиймэл оюун ухаан боловсруулсан. Банк, санхүүжүүлэгчид өгөхөөс өмнө заавал сайтар уншиж, хянаж засварлана уу:
 1. Бүх тоо (үнэ, өртөг, цалин, түрээс, зээлийн хүү, хөрөнгө оруулалт) таны бодит мэдээлэлтэй таарч байгаа эсэхийг шалгах.

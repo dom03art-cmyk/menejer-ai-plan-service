@@ -15,7 +15,8 @@ const isNum = (c) => /^[\s\-−—+]*[\d.,]+\s*(%|₮|×|жил|сая)?\s*$/.te
 
 function table(b, ctx) {
   const n = b.headers.length;
-  const widths = n === 1 ? ["*"] : n === 2 ? ["35%", "*"] : [n > 5 ? "22%" : "28%", ...Array(n - 1).fill("*")];
+  const custom = Array.isArray(b.widths) && b.widths.length === n && b.widths.every(x => x > 0) ? (() => { const sum = b.widths.reduce((a, x) => a + x, 0); return b.widths.map((x, i) => i === n - 1 ? "*" : `${(x / sum * 100).toFixed(1)}%`); })() : null;
+  const widths = custom ? custom : n === 1 ? ["*"] : n === 2 ? ["35%", "*"] : [n > 5 ? "22%" : "28%", ...Array(n - 1).fill("*")];
   const fs = n > 6 ? 7.5 : n > 4 ? 8.5 : 9.5;
   const body = [b.headers.map(h => ({ text: String(h), bold: true, color: "white", fillColor: NAVY, alignment: "center", fontSize: fs }))];
   (b.rows || []).forEach((r, ri) => {

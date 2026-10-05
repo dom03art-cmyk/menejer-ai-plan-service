@@ -40,7 +40,7 @@ function qc({ an, text, heads, written }) {
   if (Math.min(...an.R.mc.map(x => x.cash)) < 0) issues.push("Сарын мөнгөн үлдэгдэл сөрөг болж байна");
   if (an.irr > 0.40 || (an.pb !== null && an.pb < 2.5)) issues.push(`Үр ашиг хэт өндөр (IRR ${(an.irr * 100).toFixed(1)}%, нөхөгдөх ${an.pb ? an.pb.toFixed(2) : "—"} жил) — таамаглалыг шалгах`);
   try {
-    const own = (an.R.inkindTotal || 0) + (an.A.cash_equity || 0), L = an.A.loan.amount || 0;
+    const own = (an.R.inkindTotal || 0) + (an.A.cash_equity || 0) + (an.R.contingency || 0), L = an.A.loan.amount || 0;
     if (L > 0 && L / (L + own) > 0.8) issues.push(`Зээлийн хувь ${(L / (L + own) * 100).toFixed(0)}% — өөрийн оролцоо бага`);
   } catch (e) { }
   const d = an.R.dscr[0]; if (d !== null && d < 1.2) issues.push(`1-р жилийн DSCR ${d.toFixed(2)} < 1.2 — банкны шаардлага хангахгүй байж болзошгүй`);

@@ -17,7 +17,8 @@ const cellP = (t, o) => String(t ?? "").split("\n").map(line => new Paragraph({ 
 
 function table(b) {
   const n = b.headers.length;
-  const widths = n === 1 ? [W] : n === 2 ? [Math.round(W * 0.35), W - Math.round(W * 0.35)] : (() => { const first = Math.round(W * (n > 5 ? 0.24 : 0.3)); const rest = Math.floor((W - first) / (n - 1)); return [first, ...Array(n - 1).fill(rest)]; })();
+  const custom = Array.isArray(b.widths) && b.widths.length === n && b.widths.every(x => x > 0) ? (() => { const sum = b.widths.reduce((a, x) => a + x, 0); const w = b.widths.map(x => Math.floor(W * x / sum)); w[n - 1] += W - w.reduce((a, x) => a + x, 0); return w; })() : null; // сонголтоор: баганын харьцаа
+  const widths = custom ? custom : n === 1 ? [W] : n === 2 ? [Math.round(W * 0.35), W - Math.round(W * 0.35)] : (() => { const first = Math.round(W * (n > 5 ? 0.24 : 0.3)); const rest = Math.floor((W - first) / (n - 1)); return [first, ...Array(n - 1).fill(rest)]; })();
   const textCols = new Set([0, ...(b.left || [])]);
   const isText = (c, i) => textCols.has(i) || isNaN(String(c).replace(/[,%₮\s\-−—.\/×]/g, "").replace(/жил|сая/g, "")) || String(c).length > 22;
   const mk = (c, i, o) => new TableCell({ width: { size: widths[i], type: WidthType.DXA }, margins: { top: 50, bottom: 50, left: 90, right: 90 },

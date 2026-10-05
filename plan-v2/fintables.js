@@ -1,12 +1,14 @@
 // Санхүүгийн бүх хүснэгт, графикийг КОД үүсгэнэ — AI тоо бичихгүй.
 const { f, m1, pc, payroll } = require("./fmt");
 const { productUnit } = require("./model");
+const { decisionPoints } = require("./extras");
 const yrH = ["1-р жил", "2-р жил", "3-р жил", "4-р жил", "5-р жил"];
 const T = (caption, headers, rows, left) => ({ type: "table", caption, headers, rows, left });
 
 function build(an) {
   const { A, R } = an, Y = R.years, BS = R.bs, CF = R.cfs, SC = R.sched;
-  const own = R.inkindTotal + (A.cash_equity || 0);
+  const cont = R.contingency || 0, contPct = pc(R.contRate || 0, 0);
+  const own = R.inkindTotal + (A.cash_equity || 0) + cont;
   const reserve = R.reserve ?? R.launch ?? 0;
   const usesTotal = R.capexTotal + A.init_inventory + reserve + R.inkindTotal;
   const srcTotal = A.loan.amount + own;
@@ -34,11 +36,13 @@ function build(an) {
     ["!ЭХ ҮҮСВЭР", "", ""],
     ["Банкны зээл", f(A.loan.amount), pc(A.loan.amount / total)],
     ...((A.cash_equity || 0) > 0 ? [["Өөрийн мөнгөн хөрөнгө", f(A.cash_equity), pc(A.cash_equity / total)]] : []),
+    ...(cont > 0 ? [["Өөрийн мөнгөн хөрөнгө (нөөц төсөвт)", f(cont), pc(cont / total)]] : []),
     ...(R.inkindTotal > 0 ? [["Өөрийн хөрөнгийн оролцоо (эд хөрөнгөөр)", f(R.inkindTotal), pc(R.inkindTotal / total)]] : []),
     ...(gap > 0 ? [["Нэмэлт санхүүжилт шаардлагатай", f(gap), pc(gap / total)]] : []),
     ["!Нийт эх үүсвэр", f(total), "100%"],
     ["!ЗАРЦУУЛАЛТ", "", ""],
-    ["Үндсэн хөрөнгө (CAPEX)", f(R.capexTotal), pc(R.capexTotal / total)],
+    ["Үндсэн хөрөнгө (CAPEX)", f(R.capexTotal - cont), pc((R.capexTotal - cont) / total)],
+    ...(cont > 0 ? [[`Нөөц төсөв (гэнэтийн зардал, ${contPct})`, f(cont), pc(cont / total)]] : []),
     ...(A.init_inventory > 0 ? [["Түүхий эд, барааны анхны нөөц", f(A.init_inventory), pc(A.init_inventory / total)]] : []),
     ...(reserve > 0 ? [["Эргэлтийн мөнгөний нөөц", f(reserve), pc(reserve / total)]] : []),
     ...(R.inkindTotal > 0 ? [["Төсөлд оруулж буй өөрийн эд хөрөнгө", f(R.inkindTotal), pc(R.inkindTotal / total)]] : []),
@@ -61,7 +65,9 @@ function build(an) {
   X.payrollTable = [T("Цалингийн тооцоо (сарын, ₮)", ["Албан тушаал", "Тоо", "Үндсэн цалин", "Ажилтны НДШ", "ХХОАТ", "Гарт олгох", "Ажил олгогчийн НДШ", "Нийт зардал"],
     [...pay.rows.map(r => [`${r.title}${r.from_year > 1 ? ` (${r.from_year}-р жилээс)` : ""}`, r.count, f(r.gross), f(r.eeSi), f(r.it), f(r.net), f(r.erSi), f(r.total)]), ["!Нийт", "", f(pay.gross), "", "", "", "", f(pay.total)]]),
     { type: "note", text: `Ажил олгогчийн НДШ ${pc(A.er_si)}, ажилтны 11.5%, ХХОАТ 10%. Цалин жил бүр ${pc(A.fixed_growth, 0)}-иар өснө.` }];
-  X.capexTable = [T("Үндсэн хөрөнгө (CAPEX)", ["Хөрөнгө", "Тоо", "Нэгжийн үнэ (₮)", "Нийт (₮)", "Хугацаа"], [...A.capex.map(c => [c.name, c.qty, f(c.unit_price), f(c.qty * c.unit_price), `${c.life} жил`]), ["!Нийт", "", "", f(R.capexTotal), ""]])];
+  X.capexTable = [T("Үндсэн хөрөнгө (CAPEX)", ["Хөрөнгө", "Тоо", "Нэгжийн үнэ (₮)", "Нийт (₮)", "Хугацаа"], [...A.capex.map(c => [c.name, c.qty, f(c.unit_price), f(c.qty * c.unit_price), `${c.life} жил`]),
+    ...(cont > 0 ? [["Дүн (нөөц төсөвгүй)", "", "", f(R.capexTotal - cont), ""], [`Нөөц төсөв (гэнэтийн зардал) — ${contPct}`, "", "", f(cont), ""]] : []), ["!Нийт", "", "", f(R.capexTotal), ""]]),
+    ...(cont > 0 ? [{ type: "note", text: `Нөөц төсөв нь шинээр авах үндсэн хөрөнгийн ${contPct}-тай тэнцэх бөгөөд үнийн өсөлт, тээвэр, угсралтын урьдчилан тооцоогүй зардлыг нөхөхөд зориулагдана. Нөөц төсвийг зээлээс бус өөрийн хөрөнгөөс санхүүжүүлнэ; нийт хөрөнгө оруулалт болон NPV, IRR-ийн тооцоонд оруулсан.` }] : [])];
   X.inkindTable = (A.inkind || []).length ? [T("Өөрийн хөрөнгийн оролцоо (эд хөрөнгөөр)", ["Хөрөнгө", "Үнэлгээ (₮)", "Хугацаа"], [...A.inkind.map(c => [c.name, f(c.value), `${c.life} жил`]), ["!Нийт", f(R.inkindTotal), ""]])] : [];
   X.opexTable = [T("Эргэлтийн хөрөнгө", ["Зүйл", "Дүн (₮)"], [["Түүхий эдийн анхны нөөц", f(A.init_inventory)], ...(reserve > 0 ? [["Эргэлтийн мөнгөний нөөц", f(reserve)]] : []), ["!Нийт", f(A.init_inventory + reserve)]])];
   X.assumptionTable = [T("Таамаглалын хуудас", ["Хувьсагч", "Утга", "Эх сурвалж"], [
@@ -69,6 +75,7 @@ function build(an) {
     ["Үнийн / хувьсах / тогтмол зардлын өсөлт", `${pc(A.price_growth, 0)} / ${pc(A.varcost_growth, 0)} / ${pc(A.fixed_growth, 0)}`, "Инфляцын төлөв"],
     ["Маркетинг / төлбөрийн шимтгэл", `${pc(A.mkt_rate, 0)} / ${pc(A.pay_fee, 0)} орлогоос`, "Тооцоо"],
     ["Зээл", `${f(A.loan.amount)} ₮, ${A.loan.months} сар, сарын ${(A.loan.rate_monthly * 100).toFixed(2)}%`, (A.assumed_fields || []).includes("loan.rate_monthly") ? "Хүү — таамаглал" : "Захиалагч"],
+    ...(cont > 0 ? [["Нөөц төсөв (гэнэтийн зардал)", `Шинэ үндсэн хөрөнгийн ${contPct} = ${f(cont)} ₮`, "Тооцоо (өөрийн хөрөнгөөс)"]] : []),
     ["Хөнгөлөлтийн хувь / ААНОАТ", `${pc(A.disc, 0)} / ${pc(A.cit_eff, 0)}`, "Тооцоо / хууль"]], [1, 2]),
     ...((A.assumed_fields || []).length ? [{ type: "note", text: `Захиалагчаар баталгаажуулах таамаглал: ${A.assumed_fields.join("; ")}.` }] : [])];
   X.metricsTable = [T("Хөрөнгө оруулалтын үр ашиг", ["Үзүүлэлт", "Утга"], [["NPV (20%)", `${f(an.npv)} ₮`], ["IRR", pc(an.irr)], ["Нөхөгдөх хугацаа", an.pb ? `${an.pb.toFixed(2)} жил` : "5+ жил"],
@@ -96,7 +103,8 @@ function build(an) {
   X.fixedTable = [T("Тогтмол үйл ажиллагааны зардал (сая ₮)", ["Зардал", ...yrH], [...fk.map(k => row(k, y => y.fixed[k] || 0)), row("!Нийт", y => y.fixed_tot)])];
   X.depTable = [T("Элэгдлийн тооцоо (сая ₮)", ["Хөрөнгө", "Өртөг", ...yrH],
     [...A.capex.map(c => [c.name, m1(c.qty * c.unit_price), ...[0, 1, 2, 3, 4].map(y => y < c.life ? m1(c.qty * c.unit_price / c.life) : "—")]),
-     ...(A.inkind || []).map(c => [c.name, m1(c.value), ...[0, 1, 2, 3, 4].map(y => y < c.life ? m1(c.value / c.life) : "—")]),
+     ...(cont > 0 ? [["Нөөц төсөв (хөрөнгө тус бүрд хувь тэнцүүлсэн)", m1(cont), ...[0, 1, 2, 3, 4].map(y => m1(A.capex.reduce((a, c) => a + (y < c.life ? c.qty * c.unit_price / c.life : 0), 0) * (R.contRate || 0)))]] : []),
+     ...(A.inkind || []).map(c => [c.name, m1(c.value), ...[0, 1, 2, 3, 4].map(y => (c.depreciable !== false && c.life > 0 && y < c.life) ? m1(c.value / c.life) : "—")]),
      ...(A.extra_capex || []).map(e => [`${e.name} (${e.year}-р жил)`, m1(e.amount), ...[1, 2, 3, 4, 5].map(y => y >= e.year && y < e.year + e.life ? m1(e.amount / e.life) : "—")]),
      ["!Нийт", "", ...Y.map(y => m1(y.dep))]])];
   X.guarantee = [{ type: "numbered", items: ["Төсөлд тусгасан мэдээлэл үнэн зөв болно.", "Зээлийг зөвхөн төсөлд заасан зориулалтаар зарцуулна.", "Үндсэн төлбөр, хүүг хуваарийн дагуу хугацаанд нь төлнө.", "Хууль тогтоомж, татвар, нийгмийн даатгалын хуулийг мөрдөнө.", "Банкны хяналт шалгалтад бүрэн хамрагдаж, тайлан тогтмол гаргана."] },
@@ -115,7 +123,7 @@ function build(an) {
 
   // AI-д өгөх товч тоон мэдээлэл (AI тоо зохиохгүй, эндээс иш татна)
   const facts = {
-    total_project: total, loan: A.loan, own_equity: own, working_capital_reserve: Math.round(reserve), funding_gap: Math.round(gap),
+    total_project: total, loan: A.loan, own_equity: own, capex_before_contingency: Math.round(R.capexTotal - cont), contingency_reserve: Math.round(cont), contingency_rate_pct: +((R.contRate || 0) * 100).toFixed(0), capex_total_with_contingency: Math.round(R.capexTotal), working_capital_reserve: Math.round(reserve), funding_gap: Math.round(gap),
     loan_share_pct: +(A.loan.amount / total * 100).toFixed(1), own_share_pct: +(own / total * 100).toFixed(1), monthly_payment_after_grace: SC.length ? Math.round(SC[Math.min(SC.length - 1, A.loan.grace_months || 0)].pay) : 0, grace_interest_only_payment: (A.loan.grace_months || 0) > 0 ? Math.round(SC[0].pay) : null,
     years: Y.map((y, i) => ({ year: i + 1, revenue: Math.round(y.rev), gross: Math.round(y.gross), ebitda: Math.round(y.ebitda), net_income: Math.round(y.ni), debt_service: Math.round(y.ds), dscr: R.dscr[i] ? +R.dscr[i].toFixed(2) : null, units: Object.fromEntries(Object.entries(y.units).map(([k, v]) => [k, Math.round(v)])), marketing: Math.round(y.mkt) })),
     npv: Math.round(an.npv), irr: +(an.irr * 100).toFixed(1), payback_years: an.pb ? +an.pb.toFixed(2) : null, bep_revenue_y1: Math.round(an.bep.revenue), grace6_dscr_y1: an.grace6 ? +an.grace6.toFixed(2) : null,
@@ -126,6 +134,7 @@ function build(an) {
     jobs_created: (A.staff || []).reduce((s, x) => s + (Number(x.count) || 0), 0),
     taxes_by_year: Y.map((y, i) => ({ year: i + 1, income_tax: Math.round(y.tax || 0), social_insurance_employer: Math.round((A.staff || []).filter(s => (s.from_year || 1) <= i + 1).reduce((s, x) => s + x.count * x.gross * 12, 0) * (A.shi_rate || 0.125)) })),
     assumed_fields: A.assumed_fields || [], missing_info: A.missing_info || [],
+    decision_points: decisionPoints(an), // 3.6-р хэсгийн үе шат, шийдвэрийн цэг (тоог код тооцсон)
   };
   return { blocks: X, charts: C, facts };
 }

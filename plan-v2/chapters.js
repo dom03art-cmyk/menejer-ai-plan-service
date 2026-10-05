@@ -1,6 +1,8 @@
 // Бүлэг тус бүрийг ТУСДАА Claude дуудлагаар бичнэ. Хариу нь блокуудын JSON.
 const { callJSON } = require("./claude");
 const OUTLINE = require("./outline");
+const { postProcess } = require("./extras");
+const POST_IDS = new Set(["2.4", "3.4", "3.6"]);
 
 const STYLE = `Чи олон улсын түвшний бизнес төслийн зөвлөх. Монголын арилжааны банкинд өгөх бизнес төслийн хэсгийг АЛБАН БИЧГИЙН хэлээр бичнэ.
 Дүрэм:
@@ -55,7 +57,14 @@ ${ctx.conversation ? "ЗАХИАЛАГЧИЙН ӨГСӨН МЭДЭЭЛЭЛ (яр
   }
   const out = await callJSON({ system: STYLE, cached, user, maxTokens: Number(process.env.PLAN_SECTION_MAX_TOKENS || 24000) });
   const sec = (out.sections || []).find(s => s.id === item.id) || (out.sections || [])[0];
-  return sec ? cleanBlocks(sec.blocks || []) : [];
+  let blocks = sec ? cleanBlocks(sec.blocks || []) : [];
+  // 2.4 хувилбарын харьцуулалт, 3.4 оролцогч талууд, 3.6 шийдвэрийн цэг — кодоор шалгаж засна. Алдаа гарвал AI-ийн бичсэнээр үлдэнэ.
+  if (blocks.length && POST_IDS.has(item.id) && process.env.PLAN_EXTRAS !== "0") {
+    const gen = async (prompt) => { const o = await callJSON({ system: STYLE, cached, user: prompt, maxTokens: 6000 }); const s = (o.sections || [])[0]; return s ? cleanBlocks(s.blocks || []) : []; };
+    try { blocks = await postProcess(item.id, blocks, ctx, gen, (m) => console.log(`[chapters] ${m}`)); }
+    catch (e) { console.warn(`[chapters] ${item.id} нэмэлт шалгалт алгасав: ${e.message}`); }
+  }
+  return blocks;
 }
 
 // Англи нэр томьёог Монгол болгох (оноосон нэрэнд хүрэхгүй: зөвхөн мэдэгдэж буй нэр томьёо, жижиг үсгээр бичсэн хаалтан дахь англи үг)

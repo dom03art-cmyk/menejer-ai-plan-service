@@ -29,10 +29,15 @@ function run(A, o = {}) {
   const r = o.rate ?? A.loan.rate_monthly, grace = o.grace ?? (A.loan.grace_months || 0);
   const L = A.loan.amount;
   const sched = loanSchedule(L, r, A.loan.months, grace);
-  const capexTotal = A.capex.reduce((a, c) => a + c.qty * c.unit_price, 0);
+  const capexBase = A.capex.reduce((a, c) => a + c.qty * c.unit_price, 0);
+  // Нөөц төсөв (гэнэтийн зардал): шинэ үндсэн хөрөнгийн тодорхой хувь. Зээлийг өсгөхгүй — өөрийн хөрөнгөөс санхүүжинэ.
+  // Хуучин (энэ талбаргүй) таамаглалд 0 — өмнө нь хүргэсэн төслийн тоо өөрчлөгдөхгүй.
+  const contRate = Math.min(0.3, Math.max(0, Number(A.contingency_rate ?? 0) || 0));
+  const contingency = capexBase * contRate;
+  const capexTotal = capexBase + contingency;
   const inkindTotal = (A.inkind || []).reduce((a, c) => a + c.value, 0);
   // Зээл + мөнгөн өөрийн хөрөнгөөс CAPEX, анхны нөөцийг хассан үлдэгдэл = эргэлтийн мөнгөний нөөц (зардал БИШ, кассанд үлдэнэ)
-  const reserve = Math.max(0, L + (A.cash_equity || 0) - capexTotal - A.init_inventory);
+  const reserve = Math.max(0, L + (A.cash_equity || 0) - capexBase - A.init_inventory);
   const launch = reserve; // хуучин нэртэй нийцтэй байлгах
   const erSi = A.er_si ?? 0.135;
   const years = [], months = [];
@@ -56,7 +61,7 @@ function run(A, o = {}) {
     Y.gross = Y.rev - Y.cogs;
     Y.ebitda = Y.gross - Y.deliv - Y.fees - Y.mkt - Y.fixed_tot;
     let dep = 0;
-    for (const c of A.capex) if (y < c.life) dep += c.qty * c.unit_price / c.life;
+    for (const c of A.capex) if (y < c.life) dep += c.qty * c.unit_price / c.life * (1 + contRate); // нөөц төсвийг хөрөнгө тус бүрд хувь тэнцүүлэн элэгдүүлнэ
     for (const c of (A.inkind || [])) if (c.depreciable !== false && c.life > 0 && y < c.life) dep += c.value / c.life;
     for (const e of (A.extra_capex || [])) if (y + 1 >= e.year && y + 1 < e.year + e.life) dep += e.amount / e.life;
     Y.dep = dep; Y.ebit = Y.ebitda - dep;
@@ -77,9 +82,9 @@ function run(A, o = {}) {
     }
   }
   // cash flow & balance
-  let cash = L - capexTotal - A.init_inventory, invPrev = A.init_inventory;
+  let cash = L - capexBase - A.init_inventory, invPrev = A.init_inventory; // нөөц төсөв өөрийн хөрөнгөөр орж, хөрөнгө болж гарна — кассад нөлөөгүй
   let faGross = capexTotal + inkindTotal, accdep = 0, re = 0, loanbal = L;
-  const eq0 = inkindTotal + (A.cash_equity || 0); cash += (A.cash_equity || 0);
+  const eq0 = inkindTotal + (A.cash_equity || 0) + contingency; cash += (A.cash_equity || 0);
   const first12 = sched.slice(0, 12).reduce((a, s) => a + s.prin, 0);
   const bs = [{ cash, inv: A.init_inventory, fa: faGross, loan_cur: first12, loan_lt: L - first12, eq: eq0, re: 0 }];
   const cfs = [];
@@ -109,7 +114,7 @@ function run(A, o = {}) {
     const net = m.rev - variable - fixed - Y.tax * m.w - debt; mcash += net;
     mc.push({ label: m.label, rev: m.rev, variable, fixed, debt, net, cash: mcash });
   });
-  return { years, months, sched, bs, cfs, fcf, dscr, inv0, capexTotal, inkindTotal, launch, reserve, mc };
+  return { years, months, sched, bs, cfs, fcf, dscr, inv0, capexTotal, capexBase, contingency, contRate, inkindTotal, launch, reserve, mc };
 }
 
 const npv = (r, cf) => cf.reduce((a, c, i) => a + c / Math.pow(1 + r, i), 0);
