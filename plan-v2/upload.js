@@ -20,6 +20,7 @@ function verify(token) {
 }
 const received = new Map(); // psid -> [нэрс] (сүүлийн илгээлтийн баталгаанд)
 const failed = new Map();   // psid -> [{ name, message }] (уншиж чадаагүй файлууд)
+const photosOf = new Map(); // psid -> [нэрс] (баримт бичиг биш зураг)
 
 router.post("/upload-link", express.json(), (req, res) => {
   if (req.get("x-api-key") !== process.env.API_KEY) return res.status(401).json({ error: "unauthorized" });
@@ -72,6 +73,10 @@ router.post("/u/:token/file", express.json({ limit: "30mb" }), async (req, res) 
   } catch (e) {
     console.warn("[upload]", name, e.message);
     const message = /credit/i.test(e.message) ? "Систем түр саатаж байна" : e.message;
+    if (e.code === "photo") {   // үйл явц, бүтээгдэхүүний зураг — алдаа биш, тооцоонд оруулахгүй
+      const pl = photosOf.get(psid) || []; pl.push(name || "зураг"); photosOf.set(psid, pl);
+      return res.json({ ok: false, code: "photo", message: "Тооцоонд ороогүй (баримт бичиг биш)" });
+    }
     const fl = failed.get(psid) || []; fl.push({ name: name || "файл", message }); failed.set(psid, fl);
     res.json({ ok: false, message });
   }
@@ -82,14 +87,16 @@ router.post("/u/:token/done", express.json(), async (req, res) => {
   if (!psid) return res.status(404).json({ ok: false });
   const list = received.get(psid) || []; received.delete(psid);
   const bad = failed.get(psid) || []; failed.delete(psid);
+  const pics = photosOf.get(psid) || []; photosOf.delete(psid);
   const parts = [];
   if (list.length) parts.push(`📎 ${list.length} файл хүлээн авч уншлаа ✅\n${list.map((n, i) => `${i + 1}. ${n}`).join("\n")}`);
   if (bad.length) parts.push(`⚠️ ${bad.length} файл уншигдсангүй:\n${bad.map((f, i) => `${i + 1}. ${f.name} — ${f.message}`).join("\n")}\n\nЗургаа энэ чат руу шууд (зургийн товчоор) илгээнэ үү. Том PDF бол чухал хуудсуудынх нь зургийг (screenshot) илгээж болно.`);
+  if (pics.length) parts.push(`🖼 ${pics.length} зураг баримт бичиг биш (үйл явц, бүтээгдэхүүний зураг) тул тооцоонд оруулаагүй:\n${pics.map((n, i) => `${i + 1}. ${n}`).join("\n")}\n\nТөсөл гарсны дараа эдгээр зургийг Word файлын 2.4 (бүтээгдэхүүн) эсвэл 3.1 (үйл ажиллагаа) хэсэгт өөрөө оруулна уу. Банк бодит зургийг сайн хүлээж авдаг.`);
   if (parts.length) {
-    parts.push(list.length ? "Нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү. Уншсан файлуудын агуулгыг төсөлд тусгана." : "Файлаа дахин илгээсний дараа нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү.");
+    parts.push(list.length || !bad.length ? "Нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү. Уншсан файлуудын агуулгыг төсөлд тусгана." : "Файлаа дахин илгээсний дараа нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү.");
     await fbText(psid, parts.join("\n\n")).catch(() => { });
   }
-  res.json({ ok: true, count: list.length, failed: bad.length });
+  res.json({ ok: true, count: list.length, failed: bad.length, photos: pics.length });
 });
 
 const PAGE = `<!doctype html><html lang="mn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
