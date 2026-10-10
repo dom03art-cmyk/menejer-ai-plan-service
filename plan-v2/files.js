@@ -15,6 +15,7 @@ const SYSTEM = `Чи бизнес төслийн шинжээч. Захиала�
 
 function kind(mime, name) {
   const n = (name || "").toLowerCase(); const m = (mime || "").toLowerCase();
+  if (/heic|heif/.test(m) || /\.(heic|heif)$/.test(n)) return "heic";
   if (m.startsWith("image/") || /\.(jpe?g|png|gif|webp)$/.test(n)) return "image";
   if (m.includes("pdf") || n.endsWith(".pdf")) return "pdf";
   if (m.includes("wordprocessingml") || n.endsWith(".docx")) return "docx";
@@ -45,15 +46,64 @@ async function extract({ url, type, name }) {
   return extractBuffer({ buf, mime, name: decodeURIComponent(fname), type });
 }
 
+// Claude API-ийн хязгаар: зураг 5MB (base64 биш, түүхий), PDF 100 хуудас / 32MB хүсэлт
+const IMG_MAX = 3.7 * 1024 * 1024;   // base64 болоход ~5MB
+const PDF_PAGES = 100;
+const mb = (n) => (n / 1024 / 1024).toFixed(1);
+
+// Зургийн бодит төрлийг эхний байтаас тогтооно (Messenger, утас буруу mime өгөх нь бий)
+function sniffImage(buf) {
+  if (buf[0] === 0x89 && buf[1] === 0x50) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8) return "image/jpeg";
+  if (buf.slice(0, 4).toString() === "GIF8") return "image/gif";
+  if (buf.slice(0, 4).toString() === "RIFF" && buf.slice(8, 12).toString() === "WEBP") return "image/webp";
+  if (/ftyp(heic|heix|hevc|mif1|msf1)/.test(buf.slice(4, 12).toString())) return "image/heic";
+  return null;
+}
+
+// 100-аас олон хуудастай PDF-ийн эхний 100 хуудсыг салгана
+async function trimPdf(buf) {
+  try {
+    const { PDFDocument } = require("pdf-lib");
+    const doc = await PDFDocument.load(buf, { ignoreEncryption: true });
+    const n = doc.getPageCount();
+    if (n <= PDF_PAGES) return { buf, pages: n, trimmed: false };
+    const out = await PDFDocument.create();
+    const pages = await out.copyPages(doc, Array.from({ length: PDF_PAGES }, (_, i) => i));
+    pages.forEach(p => out.addPage(p));
+    return { buf: Buffer.from(await out.save()), pages: n, trimmed: true };
+  } catch (e) {
+    console.warn("[files] pdf-lib:", e.message);
+    return { buf, pages: null, trimmed: false };
+  }
+}
+
+// API-ийн англи алдааг захиалагчид ойлгомжтой болгоно
+function friendly(e, k) {
+  const m = String((e && e.message) || e || "");
+  if (/credit|balance/i.test(m)) return "Систем түр саатаж байна. Хэсэг хугацааны дараа дахин илгээнэ үү.";
+  if (k === "image" && /(5 ?MB|exceeds|too large|dimension|pixel)/i.test(m)) return "Зураг хэт том байна. Зургаа энэ чат руу шууд илгээнэ үү.";
+  if (k === "image" && /(invalid|unsupported|could not process|media_type)/i.test(m)) return "Зургийн форматыг уншиж чадсангүй. JPG эсвэл PNG зураг илгээнэ үү.";
+  if (k === "pdf" && /(password|encrypt)/i.test(m)) return "PDF файл нууц үгээр хамгаалагдсан байна. Хамгаалалтгүй хувилбар эсвэл чухал хуудсуудын зургийг илгээнэ үү.";
+  if (k === "pdf") return "PDF файлыг уншиж чадсангүй (хэт том эсвэл гэмтсэн байж магадгүй). Чухал хуудсуудын зургийг (screenshot) илгээнэ үү.";
+  return m || "Файл уншиж чадсангүй";
+}
+
 async function extractBuffer({ buf, mime, name, type }) {
-  if (buf.length > MAX) throw new Error("Файл хэт том (20MB-аас их)");
-  const k = type === "image" ? "image" : kind(mime, name);
-  let content;
+  if (buf.length > MAX) throw new Error(`Файл хэт том (${mb(buf.length)}MB, 20MB хүртэл). Чухал хуудсуудын зургийг илгээнэ үү.`);
+  let k = type === "image" ? "image" : kind(mime, name);
+  const sniff = (k === "image" || k === "heic" || k === "unknown") ? sniffImage(buf) : null;
+  if (sniff === "image/heic") k = "heic"; else if (sniff) k = "image";
+  if (k === "heic") throw new Error("iPhone-ийн HEIC зургийг уншиж чадахгүй. Зургаа энэ чат руу шууд илгээх эсвэл JPG болгож илгээнэ үү.");
+  let content, note = "";
   if (k === "image") {
-    const mt = /png/.test(mime) ? "image/png" : /webp/.test(mime) ? "image/webp" : /gif/.test(mime) ? "image/gif" : "image/jpeg";
+    if (buf.length > IMG_MAX) throw new Error(`Зураг хэт том байна (${mb(buf.length)}MB). Зургаа энэ чат руу шууд илгээнэ үү, Messenger өөрөө жижигрүүлнэ.`);
+    const mt = sniff || (/png/.test(mime) ? "image/png" : /webp/.test(mime) ? "image/webp" : /gif/.test(mime) ? "image/gif" : "image/jpeg");
     content = [{ type: "image", source: { type: "base64", media_type: mt, data: buf.toString("base64") } }, { type: "text", text: "Энэ зургаас бизнес төсөлд хэрэгтэй мэдээллийг гарга." }];
   } else if (k === "pdf") {
-    content = [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: buf.toString("base64") } }, { type: "text", text: "Энэ PDF файлаас бизнес төсөлд хэрэгтэй мэдээллийг гарга." }];
+    const t = await trimPdf(buf);
+    if (t.trimmed) note = `(PDF ${t.pages} хуудастай, эхний ${PDF_PAGES} хуудсыг уншив) `;
+    content = [{ type: "document", source: { type: "base64", media_type: "application/pdf", data: t.buf.toString("base64") } }, { type: "text", text: "Энэ PDF файлаас бизнес төсөлд хэрэгтэй мэдээллийг гарга." }];
   } else {
     let text;
     if (k === "docx") text = (await require("mammoth").extractRawText({ buffer: buf })).value;
@@ -62,8 +112,10 @@ async function extractBuffer({ buf, mime, name, type }) {
     else throw new Error("Энэ төрлийн файлыг уншиж чадахгүй. Word, Excel, PDF эсвэл зураг илгээнэ үү.");
     content = `Файлын агуулга:\n\n${text.slice(0, 120000)}`;
   }
-  const summary = await call({ system: SYSTEM, user: content, model: WRITER, maxTokens: 3000 });
-  return { kind: k, summary: String(summary).trim().slice(0, 3000) };
+  let summary;
+  try { summary = await call({ system: SYSTEM, user: content, model: WRITER, maxTokens: 3000 }); }
+  catch (e) { console.warn("[files] claude:", k, mb(buf.length) + "MB", e.message); throw new Error(friendly(e, k)); }
+  return { kind: k, summary: (note + String(summary).trim()).slice(0, 3000) };
 }
 
 function auth(req, res, next) { if (req.get("x-api-key") !== process.env.API_KEY) return res.status(401).json({ error: "unauthorized" }); next(); }

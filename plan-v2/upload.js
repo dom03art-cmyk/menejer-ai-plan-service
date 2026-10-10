@@ -19,6 +19,7 @@ function verify(token) {
   return ok ? psid : null;
 }
 const received = new Map(); // psid -> [нэрс] (сүүлийн илгээлтийн баталгаанд)
+const failed = new Map();   // psid -> [{ name, message }] (уншиж чадаагүй файлууд)
 
 router.post("/upload-link", express.json(), (req, res) => {
   if (req.get("x-api-key") !== process.env.API_KEY) return res.status(401).json({ error: "unauthorized" });
@@ -69,8 +70,10 @@ router.post("/u/:token/file", express.json({ limit: "30mb" }), async (req, res) 
     const list = received.get(psid) || []; list.push(name); received.set(psid, list);
     res.json({ ok: true, kind: out.kind });
   } catch (e) {
-    console.warn("[upload]", e.message);
-    res.json({ ok: false, message: /credit/i.test(e.message) ? "Систем түр саатаж байна" : e.message });
+    console.warn("[upload]", name, e.message);
+    const message = /credit/i.test(e.message) ? "Систем түр саатаж байна" : e.message;
+    const fl = failed.get(psid) || []; fl.push({ name: name || "файл", message }); failed.set(psid, fl);
+    res.json({ ok: false, message });
   }
 });
 
@@ -78,8 +81,15 @@ router.post("/u/:token/done", express.json(), async (req, res) => {
   const psid = verify(req.params.token);
   if (!psid) return res.status(404).json({ ok: false });
   const list = received.get(psid) || []; received.delete(psid);
-  if (list.length) await fbText(psid, `📎 ${list.length} файл хүлээн авч уншлаа ✅\n${list.map((n, i) => `${i + 1}. ${n}`).join("\n")}\n\nНэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү. Файлуудын агуулгыг төсөлд тусгана.`).catch(() => { });
-  res.json({ ok: true, count: list.length });
+  const bad = failed.get(psid) || []; failed.delete(psid);
+  const parts = [];
+  if (list.length) parts.push(`📎 ${list.length} файл хүлээн авч уншлаа ✅\n${list.map((n, i) => `${i + 1}. ${n}`).join("\n")}`);
+  if (bad.length) parts.push(`⚠️ ${bad.length} файл уншигдсангүй:\n${bad.map((f, i) => `${i + 1}. ${f.name} — ${f.message}`).join("\n")}\n\nЗургаа энэ чат руу шууд (зургийн товчоор) илгээнэ үү. Том PDF бол чухал хуудсуудынх нь зургийг (screenshot) илгээж болно.`);
+  if (parts.length) {
+    parts.push(list.length ? "Нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү. Уншсан файлуудын агуулгыг төсөлд тусгана." : "Файлаа дахин илгээсний дараа нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү.");
+    await fbText(psid, parts.join("\n\n")).catch(() => { });
+  }
+  res.json({ ok: true, count: list.length, failed: bad.length });
 });
 
 const PAGE = `<!doctype html><html lang="mn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -113,10 +123,16 @@ button:disabled{opacity:.5}
 const input=document.getElementById('f'),list=document.getElementById('list'),btn=document.getElementById('send');let files=[];
 input.onchange=()=>{files=[...input.files];list.innerHTML=files.map((f,i)=>'<li><span>'+f.name.replace(/</g,'&lt;')+'</span><span id="s'+i+'" class="wait">бэлэн</span></li>').join('');btn.disabled=!files.length;};
 const b64=f=>new Promise((ok,no)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(',')[1]);r.onerror=no;r.readAsDataURL(f);});
+const isImg=f=>/^image\\//.test(f.type)||/\\.(jpe?g|png|webp|gif|heic|heif)$/i.test(f.name);
+async function shrink(f){if(!isImg(f)||/gif/i.test(f.type))return f;try{const url=URL.createObjectURL(f);const img=await new Promise((ok,no)=>{const i=new Image();i.onload=()=>ok(i);i.onerror=no;i.src=url;});
+let w=img.naturalWidth,h=img.naturalHeight;const M=2000;if(f.size<1500000&&w<=M&&h<=M&&/jpe?g|png/i.test(f.type)){URL.revokeObjectURL(url);return f;}
+const k=Math.min(1,M/Math.max(w,h));w=Math.round(w*k);h=Math.round(h*k);const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);URL.revokeObjectURL(url);
+let q=0.85,b=await new Promise(r=>c.toBlob(r,'image/jpeg',q));while(b&&b.size>3000000&&q>0.4){q-=0.15;b=await new Promise(r=>c.toBlob(r,'image/jpeg',q));}
+if(!b)return f;return new File([b],f.name.replace(/\\.(heic|heif|png|webp|jpe?g)$/i,'')+'.jpg',{type:'image/jpeg'});}catch(e){return f;}}
 btn.onclick=async()=>{btn.disabled=true;input.disabled=true;const base=location.pathname;let good=0;
 for(let i=0;i<files.length;i++){const s=document.getElementById('s'+i);const f=files[i];
-if(f.size>20*1024*1024){s.textContent='хэт том';s.className='err';continue;}
-s.textContent='уншиж байна…';try{const r=await fetch(base+'/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:f.name,type:f.type,data:await b64(f)})});const j=await r.json();
+if(f.size>20*1024*1024&&!isImg(f)){s.textContent='хэт том (20MB хүртэл)';s.className='err';continue;}
+s.textContent='уншиж байна…';try{const g=await shrink(f);const r=await fetch(base+'/file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:f.name,type:g.type,data:await b64(g)})});const j=await r.json();
 if(j.ok){s.textContent='✅ уншлаа';s.className='ok';good++;}else{s.textContent=j.message||'алдаа';s.className='err';}}catch(e){s.textContent='алдаа';s.className='err';}}
 await fetch(base+'/done',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'}).catch(()=>{});
 if(good)document.getElementById('done').style.display='block';btn.textContent='Дахин файл сонгох бол дээрээс сонгоно уу';input.disabled=false;};

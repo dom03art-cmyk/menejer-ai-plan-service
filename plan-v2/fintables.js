@@ -134,6 +134,7 @@ function build(an) {
     jobs_created: (A.staff || []).reduce((s, x) => s + (Number(x.count) || 0), 0),
     taxes_by_year: Y.map((y, i) => ({ year: i + 1, income_tax: Math.round(y.tax || 0), social_insurance_employer: Math.round((A.staff || []).filter(s => (s.from_year || 1) <= i + 1).reduce((s, x) => s + x.count * x.gross * 12, 0) * (A.shi_rate || 0.125)) })),
     assumed_fields: A.assumed_fields || [], missing_info: A.missing_info || [],
+    excluded_sections: A.exclude || [], target_requests: A.target_requests || [],
     decision_points: decisionPoints(an), // 3.6-р хэсгийн үе шат, шийдвэрийн цэг (тоог код тооцсон)
   };
   return { blocks: X, charts: C, facts };
