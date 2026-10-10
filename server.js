@@ -112,6 +112,7 @@ app.post("/debug/parse-text", (req, res) => {
 
 // plan-v2: бүлэг бүрээр бичдэг шинэ төслийн урсгал (POST /jobs/plan, GET /jobs/:id)
 app.use(require("./plan-v2"));
+try { app.use(require("./marketing-v1")); } catch (e) { console.error("[marketing-v1] ачаалж чадсангүй:", e.message); }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
