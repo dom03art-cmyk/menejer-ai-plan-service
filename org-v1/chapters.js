@@ -68,7 +68,8 @@ ${ctx.digest ? "МАТЕРИАЛЫН ТОЙМ:\n" + JSON.stringify(ctx.digest).s
 async function writeSection(item, ctx) {
   if (!ctx._cached) ctx._cached = cachedCtx(ctx);
   const facts = researchFor(item, ctx.research);
-  const user = `${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts).slice(0, 14000) + "\n\n" : ""}БИЧИХ ХЭСЭГ:\n- id "${item.id}" — ${item.t}: доод тал нь ${item.words || 100} үг. ${item.guide || ""}${item.attach ? " [Код оруулах: " + item.attach.join(", ") + "]" : ""}`;
+  const scope = ctx.product === "report_dept" && ctx.A.org_wide ? `ХАМРАХ ХҮРЭЭ: Материалд байгууллагын хэмжээний мэдээлэл (санхүүгийн тайлан, олон хэлтэс, ТУЗ-ийн шийдвэр) байгаа ч энэ бол ЗӨВХӨН «${ctx.A.unit_name || "тайлагнагч нэгж"}»-ийн ажлын тайлан. Байгууллагын санхүүгийн үр дүнг шинжлэх, ТУЗ-ийн шийдвэрийн биелэлт, бусад хэлтсийн ажлыг дүгнэх, ТУЗ-д шийдүүлэх асуудал бичихгүй; зөвхөн энэ нэгжид хамаарах баримтыг ашигла.\n\n` : "";
+  const user = scope + `${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts).slice(0, 14000) + "\n\n" : ""}БИЧИХ ХЭСЭГ:\n- id "${item.id}" — ${item.t}: доод тал нь ${item.words || 100} үг. ${item.guide || ""}${item.attach ? " [Код оруулах: " + item.attach.join(", ") + "]" : ""}`;
   const out = await callJSON({ system: styleFor(ctx.product), cached: ctx._cached, user, maxTokens: item.maxTokens || Number(process.env.ORG_SECTION_MAX_TOKENS || 16000) });
   const sec = (out.sections || []).find((s) => String(s.id) === item.id) || (out.sections || [])[0];
   return fixText(sanitize(sec && Array.isArray(sec.blocks) ? sec.blocks.filter((b) => b && b.type) : []));

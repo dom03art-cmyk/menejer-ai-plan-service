@@ -81,7 +81,8 @@ const REPORT_NOTES = (product) => `Чи ${product === "report_dir" ? "гүйцэ
 ${RULES}
 ҮЗҮҮЛЭЛТ (indicators): тоогоор хэмжигдэх үр дүн бүр (борлуулалт, орлого, зардал, үйлчлүүлэгч, гүйцэтгэсэн ажлын тоо, хувь, хугацаа...). Сар бүрийн тоо байвал monthly[12]-д (1-р сар = индекс 0; мэдээлэлгүй сар null), зөвхөн нийт дүн байвал value. agg: sum (нийлбэр), avg (дундаж, хувь), last (сарын эцсийн үлдэгдэл, ажилтны тоо). better: "low" бол бага нь сайн (зардал, осол, гомдол, хугацаа). target — жилийн (эсвэл хамарсан хугацааны) зорилт, материалд бичигдсэн бол л; target_monthly[12] — сарын төлөвлөгөө байвал. target_type "level" — "сар бүр 30 хоногоос доош" гэх мэт түвшний зорилт. prev — өмнөх оны ижил үзүүлэлт. unit: "₮", "%", "хүн", "ш", "өдөр"… check: тоо эргэлзээтэй бол true, note-д шалтгаан.
 ТОЙМ (digest): чиг үүрэг, хийсэн ажил (тодорхой баримттай), үр дүн, хийгдээгүй ажил ба шалтгаан, бэрхшээл, ТУЗ/удирдлагын шийдвэр ба биелэлт, төсөл, хөрөнгө оруулалт, эрсдэл, хүний нөөцийн өөрчлөлт, санхүүгийн тайлбар, ирэх жилийн санал.
-JSON: {"meta":{"org_name":null,"unit_name":null,"reporter_title":null,"year":null,"months_covered":[]},
+meta.scope_org: энэ хэсэгт БАЙГУУЛЛАГЫН ХЭМЖЭЭНИЙ материал (байгууллагын санхүүгийн тайлан — баланс, орлого үр дүн, олон хэлтсийн нэгтгэсэн мэдээлэл, ТУЗ-ийн шийдвэр) байвал true, зөвхөн нэг нэгж, албан тушаалынх бол false.
+JSON: {"meta":{"org_name":null,"unit_name":null,"reporter_title":null,"year":null,"months_covered":[],"scope_org":false},
 "indicators":[{"name":"","unit":"","agg":"sum|avg|last","better":"high|low","category":"","monthly":null,"value":null,"target":null,"target_monthly":null,"target_type":null,"strict":false,"prev":null,"source":"файлын нэр, хуудас/хүснэгт","note":"","check":false}],
 "digest":{"functions":[{"name":"чиг үүрэг","works":["хийсэн ажил, баримттай"],"results":[""],"not_done":["хийгдээгүй ажил — шалтгаан"]}],
  "achievements":[],"problems":[{"problem":"","cause":"","controllable":true}],"decisions":[{"decision":"","date":"","status":"","evidence":"","note":""}],
@@ -162,7 +163,8 @@ async function reportIntake({ conversation = "", docs = [], product = "report_de
   }
   const year = Number(meta.year) || new Date().getFullYear();
   const m = { org_name: meta.org_name || "Байгууллага", unit_name: product === "report_dir" ? "" : (meta.unit_name || ""), year, months_covered: months.length ? months : undefined, indicators, issues: issues.slice(0, 30) };
-  const A = { org_name: m.org_name, unit_name: meta.unit_name || "", reporter_title: meta.reporter_title || "", year, brand: { name: m.org_name, slogan: "" }, missing_info: [], assumed_fields: [] };
+  const orgWide = product === "report_dept" && notes.some((n) => n.meta && (n.meta.scope_org === true || n.meta.scope_org === "true"));
+  const A = { org_name: m.org_name, unit_name: meta.unit_name || "", reporter_title: meta.reporter_title || "", year, org_wide: orgWide, brand: { name: m.org_name, slogan: "" }, missing_info: [], assumed_fields: [] };
   log(`[org-intake] ${indicators.length} үзүүлэлт, ${issues.length} тодруулах зүйл`);
   return { A, m, digest };
 }

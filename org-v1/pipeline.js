@@ -127,6 +127,8 @@ async function runOrg(job, log = console.log) {
     const skipped = job.result.files_skipped.length ? `\n\n📎 Уншиж чадаагүй файл: ${job.result.files_skipped.slice(0, 6).join("; ")}.` : "";
     const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
     const xl = xlsxSent ? (plan ? " Excel файлын шар нүднүүдэд тоогоо өөрчлөхөд төсөв автоматаар дахин тооцогдоно; «Гүйцэтгэл» хуудсанд сар бүрийн бодит дүнгээ бичээрэй." : " Excel файлд үзүүлэлт бүрийн сарын тоо, биелэлтийн тооцоо томьёотойгоор байгаа.") : "";
+    const scopeNote = P === "report_dept" && A.org_wide ? `\n\nℹ️ Таны илгээсэн материал байгууллагын хэмжээнийх (санхүүгийн тайлан, олон хэлтэс эсвэл ТУЗ-ийн шийдвэр) байсан тул энэ тайланг зөвхөн «${A.unit_name || "тайлагнагч нэгж"}»-ийн хүрээнд бичлээ. Байгууллагын бүтэн дүгнэлт, санхүүгийн шинжилгээ, ТУЗ-д тавих асуудал хэрэгтэй бол «Гүйцэтгэх захирлын тайлан» үйлчилгээ тохиромжтой.` : "";
+    if (scopeNote && process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `ℹ️ Хэлтсийн тайлангийн захиалгад байгууллагын хэмжээний материал ирлээ (${A.org_name}, psid ${job.psid}). Тайланг нэг нэгжийн хүрээнд бичиж, захирлын тайланг санал болгосон.`).catch(() => { });
     const where = plan ? "Эхлэх газар: 1.2 «Ирэх жилийн гол чиглэл, зорилт» ба 1.4 «Эхний 30 хоногт хийх 5 ажил»." : "Эхлэх газар: 1-р бүлэг (товч дүгнэлт) ба хавсралтын «Баталгаажуулах, нөхөх зүйлс» хүснэгт.";
     await fbText(job.psid, `✅ Таны захиалсан «${name0}» бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.${xl} Word файлыг нээхэд гарчгийн хуудасны дугаарыг шинэчлэх эсэхийг асуувал «Тийм» гэж дарна уу.
 
@@ -135,7 +137,7 @@ async function runOrg(job, log = console.log) {
 2. «[${plan ? "Байгууллага бөглөнө" : "Тайлагнагч нөхнө"}]» гэж тэмдэглэсэн хэсгүүдийг нөхөх.
 3. ${plan ? "Таамаглалын жагсаалтыг (хавсралт) удирдлагаар баталгаажуулах." : "Материалд зөрүүтэй байсан тоог (хавсралт) тулгаж засах."}
 
-${where}${skipped}${missing}`);
+${where}${scopeNote}${skipped}${missing}`);
   }
   if (process.env.ORG_DONE_WEBHOOK && !MOCK()) await fetch(process.env.ORG_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "done", ...job.result, qc: job.qc }), signal: AbortSignal.timeout(8000) }).catch((e) => log("[org] webhook алдаа " + e.message));
   step("дууслаа");
