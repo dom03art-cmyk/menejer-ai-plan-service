@@ -32,6 +32,21 @@ function qc({ product, written, extra, warnings }) {
   return issues;
 }
 
+// Кодоор оруулах хүснэгт, графикийг AI давтаж бичсэн бол (≥3 ижил баганатай хүснэгт, эсвэл код график байхад AI график) хасна
+function dedupe(written, outline, fin) {
+  const norm = (h) => String(h || "").toLowerCase().replace(/\(.*?\)|[^a-zа-яөүё0-9]+/gi, "");
+  for (const o of outline) {
+    const att = o.attach || [], list = written[o.id]; if (!att.length || !Array.isArray(list)) continue;
+    const codeHeads = att.filter((k) => !k.startsWith("chart:")).flatMap((k) => (fin.blocks[k] || []).filter((b) => b.type === "table").map((b) => new Set(b.headers.map(norm).filter(Boolean))));
+    const codeChart = att.some((k) => k.startsWith("chart:") && fin.charts[k.slice(6)]);
+    written[o.id] = list.filter((b) => {
+      if (b.type === "chart" && codeChart && /^llm/.test(String(b.key || ""))) return false;
+      if (b.type === "table" && codeHeads.some((S) => b.headers.map(norm).filter((h) => h && S.has(h)).length >= 3)) return false;
+      return true;
+    });
+  }
+}
+
 async function runOrg(job, log = console.log) {
   const t0 = Date.now(), P = job.product, step = (s) => { job.step = s; log(`[org ${job.id}] ${s} (${Math.round((Date.now() - t0) / 1000)}с)`); };
   if (!OUTLINES[P]) throw new Error(`Тодорхойгүй бүтээгдэхүүн: ${P}`);
@@ -67,6 +82,7 @@ async function runOrg(job, log = console.log) {
   const ctx = { product: P, A, facts: fin.facts, digest, research: rs, conversation: job.conversation || "", raw: raw.text || "" };
   const written0 = MOCK() ? writeAllMock(ctx) : await writeAll(ctx, undefined, (g) => log(`[org ${job.id}]   ✓ ${g}`));
   const fz = finalize(written0, A);
+  dedupe(fz.written, OUTLINES[P], fin);
 
   step("5/8 график");
   const th = pickTheme({ company: { name: A.org_name, industry: A.industry } }, job.conversation);

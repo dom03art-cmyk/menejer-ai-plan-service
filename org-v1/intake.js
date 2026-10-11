@@ -7,7 +7,7 @@ const { chunk } = require("./rawtext");
 const RULES = `Ерөнхий дүрэм:
 - Тоо, нэр, огноог ЗӨВХӨН материал болон захиалагчийн ярианаас ав. Байхгүй тоог зохиохгүй: null үлдээ.
 - Оноосон нэр (байгууллага, хэлтэс, хүн, бүтээгдэхүүн)-ийг яг бичигдсэнээр нь хуул, өөрчилж орчуулахгүй.
-- Мөнгийг ₮-өөр бүхэл тоогоор (мянга, сая гэсэн нэгжийг тооцож хувирга: "1.5 тэрбум" → 1500000000). Хувийг бутархайгаар (12.5% → 0.125) ЗӨВХӨН cfg-ийн хувь талбарт.
+- Мөнгийг ₮-өөр бүхэл тоогоор (мянга, сая гэсэн нэгжийг тооцож хувирга: "1.5 тэрбум" → 1500000000). Тайлангийн үзүүлэлтийн хувийг хувиар нь (95.5% → 95.5) бич; зөвхөн жилийн төсвийн cfg-ийн хувь талбарт (si_rate, tax_rate, cost_pct, raise.pct, scenarios) бутархайгаар (12.5% → 0.125).
 - Ажилтны хувийн мэдээлэл (регистр, утас, гэрийн хаяг, эрүүл мэнд)-ийг гаргахгүй.
 - Зөвхөн JSON буцаа.`;
 
@@ -119,6 +119,17 @@ function mergeIndicators(list, issues) {
   }
   return [...map.values()].map((x) => {
     const o = { ...x };
+    // Хувийн үзүүлэлтийг бутархайгаар (0.955) өгсөн бол 95.5 болгоно — тайланд "1.0%" гэж гарахаас сэргийлнэ
+    if (/%|хувь/i.test(String(o.unit || ""))) {
+      const vals = [...(Array.isArray(o.monthly) ? o.monthly : []), o.value, o.target, o.prev, ...(Array.isArray(o.target_monthly) ? o.target_monthly : [])].filter(nn).map(Number).filter(Number.isFinite);
+      if (vals.length && vals.every((v) => Math.abs(v) <= 1.5) && vals.some((v) => v !== 0 && Math.abs(v) < 1)) {
+        const k = (v) => (nn(v) && Number.isFinite(Number(v)) ? Math.round(Number(v) * 1000) / 10 : v);
+        if (Array.isArray(o.monthly)) o.monthly = o.monthly.map(k);
+        if (Array.isArray(o.target_monthly)) o.target_monthly = o.target_monthly.map(k);
+        for (const f of ["value", "target", "prev"]) if (nn(o[f])) o[f] = k(o[f]);
+      }
+      o.unit = "%";
+    }
     if (o.monthly && o.monthly.every((v) => !nn(v))) o.monthly = null;
     if (o.monthly) delete o.value; else delete o.monthly;
     for (const f of ["target_monthly", "target_type"]) if (!o[f]) delete o[f];

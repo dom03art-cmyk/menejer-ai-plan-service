@@ -71,8 +71,12 @@ async function writeSection(item, ctx) {
   const user = `${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts).slice(0, 14000) + "\n\n" : ""}БИЧИХ ХЭСЭГ:\n- id "${item.id}" — ${item.t}: доод тал нь ${item.words || 100} үг. ${item.guide || ""}${item.attach ? " [Код оруулах: " + item.attach.join(", ") + "]" : ""}`;
   const out = await callJSON({ system: styleFor(ctx.product), cached: ctx._cached, user, maxTokens: item.maxTokens || Number(process.env.ORG_SECTION_MAX_TOKENS || 16000) });
   const sec = (out.sections || []).find((s) => String(s.id) === item.id) || (out.sections || [])[0];
-  return sanitize(sec && Array.isArray(sec.blocks) ? sec.blocks.filter((b) => b && b.type) : []);
+  return fixText(sanitize(sec && Array.isArray(sec.blocks) ? sec.blocks.filter((b) => b && b.type) : []));
 }
+
+// Илүүдэл "\\" тэмдэгт (JSON-ий escape алдаа) зэргийг цэвэрлэнэ
+const fixText = (x) => typeof x === "string" ? x.replace(/\\+(?=\s|$|[.,;:)])/g, "").replace(/\\n/g, "\n")
+  : Array.isArray(x) ? x.map(fixText) : x && typeof x === "object" ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, k === "type" ? v : fixText(v)])) : x;
 
 async function writeAll(ctx, concurrency = Number(process.env.ORG_CONCURRENCY || 3), onProgress = () => { }) {
   const items = OUTLINES[ctx.product].filter((o) => o.group !== "static" && (o.words || o.guide));
