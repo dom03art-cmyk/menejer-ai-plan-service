@@ -30,8 +30,8 @@ async function buildPdf({ A, written, fin, charts, th, meta }) {
     for (const b of list || []) {
       if (b.type === "p") out.push({ text: rich(SAFE(b.text)), alignment: "justify", margin: [0, 0, 0, 6] });
       else if (b.type === "h3") out.push({ text: SAFE(b.text), style: "h3" });
-      else if (b.type === "bullets") out.push({ ul: b.items.map(t => rich(SAFE(t))), margin: [0, 0, 0, 6] });
-      else if (b.type === "numbered") out.push({ ol: b.items.map(t => rich(SAFE(t))), margin: [0, 0, 0, 6] });
+      else if (b.type === "bullets") out.push({ ul: b.items.map(t => ({ text: rich(SAFE(t)) })), margin: [0, 0, 0, 6] });
+      else if (b.type === "numbered") out.push({ ol: b.items.map(t => ({ text: rich(SAFE(t)) })), margin: [0, 0, 0, 6] });
       else if (b.type === "checklist") b.items.forEach(t => out.push({ columns: [{ width: 16, canvas: [{ type: "rect", x: 2, y: 3, w: 8, h: 8, lineWidth: 0.8, lineColor: "#333333" }] }, { width: "*", text: rich(SAFE(t)) }], margin: [6, 0, 0, 4] }));
       else if (b.type === "tip" || b.type === "note") out.push({ table: { widths: ["*"], body: [[{ text: rich(SAFE(b.text)), italics: true, color: GREY, fontSize: 11, alignment: "justify", margin: [8, 2, 0, 2] }]] },
         layout: { hLineWidth: () => 0, vLineWidth: (i) => i === 0 ? 2.5 : 0, vLineColor: P2 }, margin: [10, 2, 0, 10] });
