@@ -25,6 +25,13 @@ function pump() {
           if (process.env.MAKE_DONE_WEBHOOK) fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "revision_rejected", history: e.cleanedHistory || "" }) }).catch(() => { });
           return;
         }
+        if (e.status === "blocked") {
+          job.status = "blocked"; job.error = e.message; console.warn(`[${job.id}] ХААГДСАН`, e.message);
+          if (job.psid) await fbText(job.psid, require("./guard").CUSTOMER_MSG).catch(() => { });
+          if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `⛔ Бизнес төслийн захиалгыг хаалаа (job ${job.id}, psid ${job.psid || "-"}): ${String(e.message).slice(0, 300)}. Төлбөрийг шалгаж, захиалагчтай холбогдоно уу.`).catch(() => { });
+          if (process.env.MAKE_DONE_WEBHOOK) fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "blocked", error: e.message }) }).catch(() => { });
+          return;
+        }
         job.status = "failed"; job.error = e.message; console.error(`[${job.id}] АЛДАА`, e);
         const credit = /credit balance/i.test(e.message || "");
         if (job.psid) await fbText(job.psid, credit ? "Уучлаарай, систем түр саатаж байна. Засагдмагц таны төслийг автоматаар боловсруулж илгээнэ. Хүлээсэнд баярлалаа 🙏" : "Уучлаарай, төсөл боловсруулахад техникийн саатал гарлаа. Та дурын мессеж бичиж дахин эхлүүлж болно, эсвэл манай ажилтан тантай удахгүй холбогдоно.").catch(() => { });

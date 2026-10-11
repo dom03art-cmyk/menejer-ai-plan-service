@@ -1,5 +1,6 @@
 // Бүтэн урсгал: таамаглал → санхүүгийн загвар → судалгаа → бүлгүүд → Word → шалгалт → илгээх
 const { extract, normalize } = require("./intake");
+const { checkContent, blockedError } = require("./guard");
 const { analyse } = require("./model");
 const { build } = require("./fintables");
 const { research } = require("./research");
@@ -102,6 +103,11 @@ async function runRevision(job, prev, step, log) {
 
 async function runPipeline(job, log = console.log) {
   const t0 = Date.now(); const step = (s) => { job.step = s; log(`[${job.id}] ${s} (${Math.round((Date.now() - t0) / 1000)}с)`); };
+  // Хууль бус, хор хөнөөлтэй үйл ажиллагаанд төсөл бичихгүй
+  if (job.conversation) {
+    const g = await checkContent(job.conversation);
+    if (!g.allowed) { log(`[${job.id}] ХААВ: ${g.category} — ${g.reason}`); throw blockedError(g); }
+  }
   // Засварын хүсэлт анхны сэдвийн хүрээнд эсэхийг шалгах
   if (job.conversation) {
     let sc = { inScope: true };
