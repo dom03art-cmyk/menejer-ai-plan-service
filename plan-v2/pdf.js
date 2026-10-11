@@ -37,8 +37,8 @@ function blocks(list, ctx) {
     if (!b || !b.type) continue;
     if (b.type === "p") out.push({ text: rich(b.text), alignment: "justify", margin: [0, 0, 0, 6], leadingIndent: 20 });
     else if (b.type === "h3") out.push({ text: b.text, style: "h3", tocItem: true, tocMargin: [30, 0, 0, 0] });
-    else if (b.type === "bullets") out.push({ ul: (b.items || []).map(rich), margin: [0, 0, 0, 6] });
-    else if (b.type === "numbered") out.push({ ol: (b.items || []).map(rich), margin: [0, 0, 0, 6] });
+    else if (b.type === "bullets") out.push({ ul: (b.items || []).map(t => ({ text: rich(t) })), margin: [0, 0, 0, 6] });
+    else if (b.type === "numbered") out.push({ ol: (b.items || []).map(t => ({ text: rich(t) })), margin: [0, 0, 0, 6] });
     else if (b.type === "note") out.push({ text: b.text, italics: true, fontSize: 8.5, color: GREY, margin: [0, 2, 0, 10] });
     else if (b.type === "box") out.push({ table: { widths: ["*"], body: [[{ stack: [{ text: b.title || "", bold: true, color: NAVY, margin: [0, 0, 0, 4] }, ...String(b.text || "").split("\n").map(t => ({ text: rich(t), alignment: "justify" }))], fillColor: LIGHT, margin: [8, 6, 8, 6] }]] },
       layout: { hLineWidth: () => 0, vLineWidth: (i) => i === 0 ? 3 : 0, vLineColor: GOLD }, margin: [0, 4, 0, 10] });
