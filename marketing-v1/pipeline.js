@@ -81,6 +81,7 @@ async function runMarketing(job, log = console.log) {
     let xlsxSent = false;
     if (job.xlsx) { try { await fbFile(job.psid, job.xlsx, job.filename.replace(/\.docx$/, ".xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); xlsxSent = true; } catch (e) { log(`[mkt ${job.id}] Excel илгээж чадсангүй: ${e.message}`); } }
     const assumed = A.ad_history_used ? "" : "\n3. Зарын үзүүлэлтүүд (харуулалтын үнэ, товшилт, чатаас захиалга болох хувь) таамаглал. Эхний 2 долоо хоногийн бодит үр дүнгээр 9-р бүлгийн тооцоог нягтлаарай.";
+    const election = A.election ? "\n\n🗳 Сонгуулийн сануулга: Сонгуулийн сурталчилгааг зөвхөн хуулиар тогтоосон хугацаанд явуулж, ашиглах цахим хуудсаа сонгуулийн хороонд бүртгүүлнэ. Зардал, хугацааны шаардлагыг сонгуулийн хороо эсвэл хуульчтай заавал тулгаж шалгаарай." : "";
     const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
     await fbText(job.psid, `✅ Таны маркетингийн төлөвлөгөө бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.${xlsxSent ? " Excel файлын шар нүднүүдэд өөрийн тоог оруулахад төсөв, үр дүн автоматаар дахин тооцогдоно; «Гүйцэтгэлийн хяналт» хуудсанд сар бүрийн бодит дүнгээ бичээрэй." : ""} Word файлыг нээхэд гарчгийн хуудасны дугаарыг шинэчлэх эсэхийг асуувал «Тийм» гэж дарна уу.
 
@@ -88,7 +89,7 @@ async function runMarketing(job, log = console.log) {
 1. Үнэ, нөхцөл, брэндийн мэдээлэл таны бодит байдалтай таарч байгаа эсэх.
 2. «[Захиалагч бөглөнө]» гэж тэмдэглэсэн хэсгүүдийг нөхөх.${assumed}
 
-Эхлэх газар: 1.4 «Эхний 30 хоногт хийх 5 ажил» ба 8.3 «Эхний 30 хоногийн календарь».${missing}`);
+Эхлэх газар: 1.4 «Эхний 30 хоногт хийх 5 ажил» ба 8.3 «Эхний 30 хоногийн календарь».${election}${missing}`);
   }
   if (process.env.MKT_DONE_WEBHOOK && !MOCK()) await fetch(process.env.MKT_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, product: "marketing", status: "done", ...job.result, qc: job.qc }) }).catch(e => log("[mkt] webhook алдаа " + e.message));
   step("дууслаа");

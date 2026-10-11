@@ -4,6 +4,7 @@ const { callJSON } = require("../plan-v2/claude");
 const { addMonths } = require("./calc");
 
 const SYSTEM = `Чи маркетингийн төлөвлөгөөний мэдээлэл задлагч. Захиалагчтай хийсэн ярианаас доорх JSON-г гарга. Захиалагчийн хэлсэн тоо, нэрийг яг тэр чигээр нь ашигла (оноосон нэрийг засахгүй). Хэлээгүй зүйлийг null болгож, assumed_fields-д бич.
+"election": захиалагч сонгуульд (УИХ, Ерөнхийлөгч, ИТХ г.м.) нэр дэвших эсвэл сонгуулийн кампанит ажилд зориулж хүсэж байвал true, бусад үед false.
 Сувгийн төлөвлөлтийн дүрэм:
 - Захиалагчийн хүн хүч, төсөвт тохирсон 2-4 төлбөртэй суваг/кампанит ажил (ганц хүнтэй, бага төсөвтэй бол 2-3). Ихэвчлэн: борлуулалтын зар (төсвийн 55-65%), танигдалт/сонирхол татах видео зар (20-25%), дахин хандах зар (10-15%).
 - Сувгийн сарын төсвүүд + тогтмол зардлын сарын дүн нь сарын төсвөөс хэтрэхгүй.
@@ -12,7 +13,7 @@ const SYSTEM = `Чи маркетингийн төлөвлөгөөний мэд�
 - fixed_costs: зөвхөн мөнгө гарах зүйл (дизайн/видео хэрэгсэл, хэвлэл, зураг авалт, нөөц 5-10%). Өөрөө хийх ажилд зардал бүү тавь.
 - gross_margin_pct: захиалагч өртөг/ашгаа хэлсэн бол түүнээс бод; үгүй бол салбарын ердийн түвшний доод талыг авч assumed_fields-д бич.
 Зөвхөн JSON:
-{"subject_type":"product|organization|person","brand":{"name":"","slogan":null,"offer":"юу санал болгодог, нэг өгүүлбэр","price_text":"үнэ, нөхцөл","colors":null,"industry":""},
+{"subject_type":"product|organization|person","election":false,"brand":{"name":"","slogan":null,"offer":"юу санал болгодог, нэг өгүүлбэр","price_text":"үнэ, нөхцөл","colors":null,"industry":""},
 "team":{"size":1,"marketer":"хэн хариуцах"},"location":"","sales_channel":"чат|вэбсайт|дэлгүүр|B2B|холимог",
 "start_month":"YYYY-MM (захиалагч эхлэх сараа хэлсэн бол, ж: 11-р сараас → оны дугаартай 2026-11; хэлээгүй бол null)","goal":{"text":"","period_months":3},"money":{"monthly_budget":0,"avg_order_value":0,"gross_margin_pct":0.5,"purchases_per_year":1.0,"baseline_monthly_revenue":0},
 "current":{"channels":"одоо ашиглаж буй суваг, дагагч","orders":"одоогийн борлуулалт","proof":"сэтгэгдэл, нотолгоо"},
@@ -28,6 +29,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 function normalize(raw, now = new Date()) {
   const A = JSON.parse(JSON.stringify(raw || {}));
   A.subject_type = ["product", "organization", "person"].includes(A.subject_type) ? A.subject_type : "product";
+  A.election = A.election === true || A.election === "true";
   A.brand = Object.assign({ name: "Брэнд", slogan: null, offer: "", price_text: "", colors: null, industry: "" }, A.brand || {});
   A.team = Object.assign({ size: 1, marketer: "Эзэн өөрөө" }, A.team || {});
   A.goal = Object.assign({ text: "", period_months: 3 }, A.goal || {});

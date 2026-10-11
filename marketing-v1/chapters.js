@@ -64,8 +64,16 @@ function researchFor(group, r) {
 
 async function makeBlueprint(ctx) {
   return callJSON({ system: BLUEPRINT, maxTokens: 12000,
-    user: `${SUBJECT[ctx.A.subject_type]}\n\nЗАХИАЛАГЧИЙН МЭДЭЭЛЭЛ:\n${JSON.stringify(profile(ctx.A))}\n\nТООЦООНЫ ТОО:\n${JSON.stringify({ channels: ctx.facts.channels.map(c => ({ name: c.name, budget_share_pct: c.budget_share_pct })), fixed_costs: ctx.facts.fixed_costs, months: ctx.facts.months, summary: ctx.facts.summary })}\n\nСУДАЛГААНЫ БАРИМТ:\n${JSON.stringify(researchFor("analysis", ctx.research)).slice(0, 14000)}\n\nЯРИА:\n${String(ctx.conversation || "").slice(0, 10000)}` });
+    user: `${SUBJECT[ctx.A.subject_type]}${ctx.A.election ? "\n\n" + ELECTION : ""}\n\nЗАХИАЛАГЧИЙН МЭДЭЭЛЭЛ:\n${JSON.stringify(profile(ctx.A))}\n\nТООЦООНЫ ТОО:\n${JSON.stringify({ channels: ctx.facts.channels.map(c => ({ name: c.name, budget_share_pct: c.budget_share_pct })), fixed_costs: ctx.facts.fixed_costs, months: ctx.facts.months, summary: ctx.facts.summary })}\n\nСУДАЛГААНЫ БАРИМТ:\n${JSON.stringify(researchFor("analysis", ctx.research)).slice(0, 14000)}\n\nЯРИА:\n${String(ctx.conversation || "").slice(0, 10000)}` });
 }
+
+// Сонгуулийн зорилготой хувь хүний төлөвлөгөөнд хуулийн хязгаарыг бүх хэсэгт сануулна. Хуулийн заалт, хоногийг зохиохгүй.
+const ELECTION = `СОНГУУЛЬ: Энэ бол сонгуульд нэр дэвших зорилготой төлөвлөгөө. Мөрдөх дүрэм:
+- Сонгуулийн сурталчилгааг (санал өгөхийг уриалах, нэр дэвшигч гэж танилцуулах) ЗӨВХӨН хуулиар тогтоосон албан ёсны сурталчилгааны хугацаанд төлөвлө. Түүнээс өмнөх хугацааны ажлыг хувийн брэнд, олон нийтэд танигдах, иргэдийн санал сонсох хэлбэрээр бич; "надад санал өгөөрэй", "нэр дэвшинэ" гэх уриалга бичихгүй.
+- Сурталчилгааны хугацаанд ашиглах цахим хуудас, олон нийтийн сүлжээний хуудсаа сонгуулийн хороонд бүртгүүлэх шаардлагатай; хиймэл оюун ухаанаар бүтээсэн зураг, дуу, бичлэгт тэмдэглэгээ тавих шаардлагатай (Сонгуулийн ерөнхий хорооны цахим орчны сурталчилгааны журам, 2024).
+- Сонгуулийн зардлын хязгаар, хандив, санхүүгийн тайлангийн шаардлага хуулиар зохицуулагддаг тул төсвийг захиалагч сонгуулийн хороо, хуулийн мэргэжилтэнтэй тулгаж шалгах ёстой гэж сануул.
+- Хуулийн заалтын дугаар, хугацааны хоног, торгуулийн хэмжээг зохиож бичихгүй. Өрсөлдөгч нэр дэвшигч, намыг муулахгүй, худал мэдээлэл тараахыг санал болгохгүй.`;
+const ELECTION_FOCUS = { "1.4": "Эхний ажлын нэг нь сурталчилгааны хугацаа, бүртгэлийн шаардлагыг сонгуулийн хороонд тодруулах байх ёстой.", "6.1": "Сувгийн хүснэгтэд аль суваг сурталчилгааны хугацаанд, аль нь түүнээс өмнө ашиглагдахыг тусад нь заа.", "8.1": "Үе шатыг сурталчилгааны хугацааны өмнөх ба сурталчилгааны хугацаа гэж хуваа.", "11.1": "Эрсдэлийн хүснэгтэд сонгуулийн хууль зөрчих (хугацаанаас өмнө сурталчлах, бүртгэлгүй хуудас, тэмдэглэгээгүй AI контент, зардлын хязгаар) эрсдэлийг заавал оруул." };
 
 async function writeSection(item, ctx) {
   const facts = researchFor(item.group, ctx.research);
@@ -75,7 +83,8 @@ async function writeSection(item, ctx) {
 ТООЦООНЫ ТОО (кодоор тооцсон, тоог зөвхөн эндээс ав):\n${JSON.stringify(ctx.facts)}
 ${ctx.conversation ? "ЗАХИАЛАГЧИЙН ӨГСӨН МЭДЭЭЛЭЛ (яриа):\n" + String(ctx.conversation).slice(0, 12000) : ""}`;
   const user = `${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts).slice(0, 16000) + "\n\n" : ""}БИЧИХ ХЭСЭГ:\n- id "${item.id}" — ${item.t}: доод тал нь ${item.words || 100} үг. ${item.guide || ""}${item.attach ? " [Код оруулах: " + item.attach.join(", ") + "]" : ""}${item.id === "8.3" ? `\nКалендарийн 1-р өдөр: ${ctx.A.start_date}.` : ""}`;
-  const out = await callJSON({ system: STYLE, cached, user, maxTokens: item.maxTokens || Number(process.env.MKT_SECTION_MAX_TOKENS || 20000) });
+  const userX = ctx.A && ctx.A.election ? `${ELECTION}${ELECTION_FOCUS[item.id] ? "\n" + ELECTION_FOCUS[item.id] : ""}\n\n${user}` : user;
+  const out = await callJSON({ system: STYLE, cached, user: userX, maxTokens: item.maxTokens || Number(process.env.MKT_SECTION_MAX_TOKENS || 20000) });
   const sec = (out.sections || []).find(s => String(s.id) === item.id) || (out.sections || [])[0];
   let blocks = sec && Array.isArray(sec.blocks) ? sec.blocks.filter(b => b && b.type) : [];
   if (item.id === "6.5") blocks = await fixAdCopy(blocks);
