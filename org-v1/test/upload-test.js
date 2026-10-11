@@ -88,18 +88,18 @@ async function makeXlsx() {
     // --- дууслаа ---
     const done = await (await post(path + "/done")).json();
     const q = priceFor("report_dept", expected);
-    assert.ok(done.ok && done.units === expected && done.price === q.price && done.price === 99900, JSON.stringify(done));
+    assert.ok(done.ok && done.units === expected && done.price === q.price && done.price === 69900, JSON.stringify(done));
     assert.strictEqual(sent.length, 1);
     const t = sent[0].text;
-    for (const s of [`Таны илгээсэн материалын хэмжээ: ${expected} хуудас`, "бичлэг.mp4", "99 900₮", "төлбөр баталгаажсаны дараа", "дахин тооцогдоно"]) assert.ok(t.includes(s), "Messenger текстэд алга: " + s);
+    for (const s of [`Таны илгээсэн материалын хэмжээ: ${expected} хуудас`, "бичлэг.mp4", "69 900₮", "төлбөр баталгаажсаны дараа", "дахин тооцогдоно"]) assert.ok(t.includes(s), "Messenger текстэд алга: " + s);
     assert.ok(!/[*#`]/.test(t), "markdown тэмдэгт");
     const quote = await (await fetch(B + "/org/quote/111", { headers: { "x-api-key": "test" } })).json();
-    assert.strictEqual(quote.meta.quote.price, 99900); assert.strictEqual(quote.files.length, 4); assert.strictEqual(quote.rejected.length, 0);
-    console.log("✓ done → 99 900₮, Messenger текст:\n---\n" + t + "\n---");
+    assert.strictEqual(quote.meta.quote.price, 69900); assert.strictEqual(quote.files.length, 4); assert.strictEqual(quote.rejected.length, 0);
+    console.log("✓ done → 69 900₮, Messenger текст:\n---\n" + t + "\n---");
 
     // --- файл хасах → үнэ дахин бодогдоно ---
     const rm = await (await post(path + "/remove", { id: pdf.id })).json();
-    assert.ok(rm.ok && rm.total === expected - 23 && rm.price === 79900);
+    assert.ok(rm.ok && rm.total === expected - 23 && rm.price === 49900);
     console.log("✓ PDF хассаны дараа", rm.total, "хуудас,", rm.priceText);
 
     // --- plan, файлгүй ---
