@@ -86,7 +86,7 @@ ${ctx.conversation ? "ЗАХИАЛАГЧИЙН ӨГСӨН МЭДЭЭЛЭЛ (яр
 const JARGON = /\s*\((?:[^()]*\b(?:summary|facts|team\.\w+|[a-z]+_[a-z_]+|blueprint)\b[^()]*)\)/gi;
 function clean(t) {
   return String(t).replace(JARGON, "").replace(/ТОЙМ(?:-?[дт]|-?оор|-?ын)?\s+(тодорхойлсон|заасан|тогтоосон)/g, "энэ төлөвлөгөөнд $1")
-    .replace(/(?<![А-Яа-яӨөҮүЁё])ТОЙМ[А-Яа-яӨөҮүЁё-]*/g, "төлөвлөгөө").replace(/\b(?:summary|budget_share_pct|free_channels|team\.size)\b/g, "").replace(/ {2,}/g, " ").replace(/(^|[.!?]\s+)энэ төлөвлөгөөнд/g, "$1Энэ төлөвлөгөөнд");
+    .replace(/(?<![А-Яа-яӨөҮүЁё])ТОЙМ[А-Яа-яӨөҮүЁё-]*/g, "төлөвлөгөө").replace(/\s*\(web_?search\)/gi, "").replace(/\b(?:summary|budget_share_pct|free_channels|team\.size|web_search)\b/g, "").replace(/\n\s*\.\s+/g, "\n").replace(/ {2,}/g, " ").replace(/(^|[.!?]\s+)энэ төлөвлөгөөнд/g, "$1Энэ төлөвлөгөөнд");
 }
 function sanitize(x) {
   if (typeof x === "string") return clean(x);

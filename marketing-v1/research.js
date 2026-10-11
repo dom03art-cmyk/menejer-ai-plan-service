@@ -10,7 +10,9 @@ const TOPICS = {
 };
 async function research(A) {
   const one = async (k) => { try { return (await callJSON({ system: SYSTEM, user: TOPICS[k](A), webSearch: true, maxSearches: 8, maxTokens: 16000, model: WRITER })).facts || []; } catch (e) { if (/credit balance/i.test(e.message || "")) throw e; console.warn(`[mkt-research] ${k}: ${e.message}`); return []; } };
-  const [market, competitors] = await Promise.all([one("market"), one("competitors")]);
+  const fixSrc = (arr) => arr.map((f) => { const src = String(f.source || "");
+    return /web_?search|судалгааны тойм|хайлтын үр дүн/i.test(src) || !src.trim() ? { ...f, source: "Нээлттэй эх сурвалжийн хайлт" } : f; });
+  const [market, competitors] = (await Promise.all([one("market"), one("competitors")])).map(fixSrc);
   return { market, competitors };
 }
 module.exports = { research };
