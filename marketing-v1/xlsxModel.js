@@ -258,6 +258,8 @@ function buildXlsx(A, cfg, calc) {
   // ───────────── 6. ХУРААНГУЙ ─────────────
   title(w0, "Маркетингийн тооцооны хураангуй", `${brand} · ${monthText(R.months[0].month)} – ${monthText(R.months[n - 1].month)} (${n} сар)`);
   section(w0, 4, "Гол үзүүлэлт", 3); head(w0, 5, ["Үзүүлэлт", "Утга", "Тайлбар"]);
+  // calc.js сар бүрийн худалдан авалтыг 0.1-ээр бөөрөнхийлдөг тул харьцааны үзүүлэлтэд бөөрөнхийллийн зөрүүг зөвшөөрнө
+  const relTol = (sales) => 0.012 + 0.06 * n * Math.max(1, chs.length) / Math.max(Number(sales) || 0, 0.1);
   const K = {}; let kr = 6;
   const kpi = (key, lbl, formula, fmt, note, exp, tol) => { put(w0, kr, 1, lbl); f(w0, kr, 2, formula, fmt); put(w0, kr, 3, note || "").font = font({ size: 9, color: { argb: "FF666666" } }); K[key] = `$B$${kr}`; if (exp !== undefined) chk(S_SUM, kr, 2, exp, lbl, tol); kr++; };
   kpi("cost", "Маркетингийн нийт зардал (₮)", MT(4), NUM, "зар + тогтмол", S.total_marketing_cost, n);
@@ -272,11 +274,11 @@ function buildXlsx(A, cfg, calc) {
   kpi("rev", "Маркетингаас орох орлого (₮)", MT(10), NUM, "", S.marketing_revenue, Math.max(n, 0.06 * n * chs.length * Number(cfg.avg_order_value || 0)));
   kpi("gp", "Үүнээс нийт ашиг (₮)", MT(11), NUM, "орлого × ашгийн хувь");
   kpi("net", "Цэвэр хувь нэмэр — эхний худалдан авалт (₮)", MT(12), NUM, "нийт ашиг − маркетингийн зардал", S.net_contribution_first_purchase, Math.max(n, 0.06 * n * chs.length * Number(cfg.avg_order_value || 0)));
-  kpi("cac", "Нэг шинэ худалдан авагчийн өртөг — CAC (₮)", `IF(${K.sales}=0,"—",${K.cost}/${K.sales})`, NUM, "нийт зардал ÷ шинэ худалдан авагч", S.cac, Math.max(1, (S.cac || 0) * 0.01));
-  kpi("roas", "Зардлын өгөөж — ROAS (нийт зардлаар)", `IF(OR(${K.cost}=0,${P.aov}=0),"—",${K.rev}/${K.cost})`, DEC, "орлого ÷ нийт зардал", S.roas_total_cost, 0.01 + (S.roas_total_cost || 0) * 0.01);
+  kpi("cac", "Нэг шинэ худалдан авагчийн өртөг — CAC (₮)", `IF(${K.sales}=0,"—",${K.cost}/${K.sales})`, NUM, "нийт зардал ÷ шинэ худалдан авагч", S.cac, Math.max(1, (S.cac || 0) * relTol(S.new_customers)));
+  kpi("roas", "Зардлын өгөөж — ROAS (нийт зардлаар)", `IF(OR(${K.cost}=0,${P.aov}=0),"—",${K.rev}/${K.cost})`, DEC, "орлого ÷ нийт зардал", S.roas_total_cost, 0.01 + (S.roas_total_cost || 0) * relTol(S.new_customers));
   kpi("be", "Алдагдалгүй байх ROAS", `IF(${P.gm}=0,"—",1/${P.gm})`, DEC, "1 ÷ ашгийн хувь — ROAS үүнээс их байх ёстой", S.break_even_roas, 0.006);
   kpi("ltv", "Нэг үйлчлүүлэгчийн насан туршийн ашиг — LTV (₮)", `${P.aov}*${P.gm}*${P.ppy}*${P.ret}`, NUM, "үнэ × ашгийн хувь × жилд авах тоо × жил", S.ltv_gross_profit, 1);
-  kpi("lc", "LTV / CAC", `IF(OR(${K.sales}=0,${K.cost}=0),"—",${K.ltv}/${K.cac})`, DEC, "3.0-аас дээш бол эрүүл", S.ltv_cac_ratio, 0.01 + (S.ltv_cac_ratio || 0) * 0.01);
+  kpi("lc", "LTV / CAC", `IF(OR(${K.sales}=0,${K.cost}=0),"—",${K.ltv}/${K.cac})`, DEC, "3.0-аас дээш бол эрүүл", S.ltv_cac_ratio, 0.01 + (S.ltv_cac_ratio || 0) * relTol(S.new_customers));
   kpi("pb", "Зардал нөхөгдөх сар (эхний худалдан авалтаар)", `IF(${MT(14)}=0,"Хугацаандаа нөхөгдөхгүй",${MT(14)})`, "0", "хуримтлагдсан цэвэр хувь нэмэр 0-ээс давах сар", S.payback_month_first_purchase ?? undefined, 0.001);
   kpi("pct", "Маркетингийн зардал нийт орлогод эзлэх хувь", `IF((${K.rev}+${P.base}*${n})=0,"—",${K.cost}/(${K.rev}+${P.base}*${n}))`, PCT, "ердийн хүрээ 5–15%, шинэ бизнест 20% хүртэл",
     S.marketing_cost_pct_of_total_revenue === null ? undefined : S.marketing_cost_pct_of_total_revenue / 100, 0.0006 + (S.marketing_cost_pct_of_total_revenue || 0) / 100 * 0.01);
@@ -288,7 +290,7 @@ function buildXlsx(A, cfg, calc) {
   const scRows = {};
   const scRow = (key, lbl, mkF, fmt, expKey, tolFn) => {
     put(w0, kr, 1, lbl); scRows[key] = kr;
-    SC.forEach(([c, , sk]) => { f(w0, kr, c, mkF(col(c)), fmt); const ex = calc.scenarios[sk][expKey]; if (expKey && ex !== null && ex !== undefined) chk(S_SUM, kr, c, ex, `${sk} ${lbl}`, tolFn(ex)); });
+    SC.forEach(([c, , sk]) => { f(w0, kr, c, mkF(col(c)), fmt); const ex = calc.scenarios[sk][expKey]; if (expKey && ex !== null && ex !== undefined) chk(S_SUM, kr, c, ex, `${sk} ${lbl}`, tolFn(ex, calc.scenarios[sk].new_customers)); });
     kr++;
   };
   const moneyTol = () => Math.max(n, 0.06 * n * chs.length * Number(cfg.avg_order_value || 0) * 1.3);
@@ -296,9 +298,9 @@ function buildXlsx(A, cfg, calc) {
   scRow("sales", "Шинэ худалдан авагч", (c) => `${K.sales}*${c}${scM}/${P.mult}`, D1, "new_customers", () => 0.051 * n * chs.length * 1.3);
   scRow("rev", "Орлого (₮)", (c) => `${c}${scRows.sales}*${P.aov}`, NUM, "marketing_revenue", moneyTol);
   scRow("net", "Цэвэр хувь нэмэр (₮)", (c) => `${c}${scRows.rev}*${P.gm}-${c}${scRows.cost}`, NUM, "net_contribution_first_purchase", moneyTol);
-  scRow("cac", "CAC (₮)", (c) => `IF(${c}${scRows.sales}=0,"—",${c}${scRows.cost}/${c}${scRows.sales})`, NUM, "cac", (ex) => Math.max(1, ex * 0.012));
-  scRow("roas", "ROAS (нийт зардлаар)", (c) => `IF(OR(${c}${scRows.cost}=0,${P.aov}=0),"—",${c}${scRows.rev}/${c}${scRows.cost})`, DEC, "roas_total_cost", (ex) => 0.01 + ex * 0.012);
-  scRow("lc", "LTV / CAC", (c) => `IF(${c}${scRows.sales}=0,"—",${K.ltv}*${c}${scRows.sales}/${c}${scRows.cost})`, DEC, "ltv_cac_ratio", (ex) => 0.01 + ex * 0.012);
+  scRow("cac", "CAC (₮)", (c) => `IF(${c}${scRows.sales}=0,"—",${c}${scRows.cost}/${c}${scRows.sales})`, NUM, "cac", (ex, sc) => Math.max(1, ex * relTol(sc)));
+  scRow("roas", "ROAS (нийт зардлаар)", (c) => `IF(OR(${c}${scRows.cost}=0,${P.aov}=0),"—",${c}${scRows.rev}/${c}${scRows.cost})`, DEC, "roas_total_cost", (ex, sc) => 0.01 + ex * relTol(sc));
+  scRow("lc", "LTV / CAC", (c) => `IF(${c}${scRows.sales}=0,"—",${K.ltv}*${c}${scRows.sales}/${c}${scRows.cost})`, DEC, "ltv_cac_ratio", (ex, sc) => 0.01 + ex * relTol(sc));
   put(w0, kr, 1, "Хувилбаруудад зардал ижил, зөвхөн хөрвүүлэлт (худалдан авалт) өөрчлөгдөнө.").font = font({ italic: true, size: 9, color: { argb: "FF666666" } }); kr += 2;
 
   if ((calc.warnings || []).length) {

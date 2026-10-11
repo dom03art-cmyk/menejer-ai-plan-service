@@ -14,7 +14,7 @@ const SYSTEM = `Чи маркетингийн төлөвлөгөөний мэд�
 Зөвхөн JSON:
 {"subject_type":"product|organization|person","brand":{"name":"","slogan":null,"offer":"юу санал болгодог, нэг өгүүлбэр","price_text":"үнэ, нөхцөл","colors":null,"industry":""},
 "team":{"size":1,"marketer":"хэн хариуцах"},"location":"","sales_channel":"чат|вэбсайт|дэлгүүр|B2B|холимог",
-"goal":{"text":"","period_months":3},"money":{"monthly_budget":0,"avg_order_value":0,"gross_margin_pct":0.5,"purchases_per_year":1.0,"baseline_monthly_revenue":0},
+"start_month":"YYYY-MM (захиалагч эхлэх сараа хэлсэн бол, ж: 11-р сараас → оны дугаартай 2026-11; хэлээгүй бол null)","goal":{"text":"","period_months":3},"money":{"monthly_budget":0,"avg_order_value":0,"gross_margin_pct":0.5,"purchases_per_year":1.0,"baseline_monthly_revenue":0},
 "current":{"channels":"одоо ашиглаж буй суваг, дагагч","orders":"одоогийн борлуулалт","proof":"сэтгэгдэл, нотолгоо"},
 "audience":"гол худалдан авагчид","competitors":["нэр эсвэл төрөл"],"customer_voice":["хэрэглэгчийн бодит үг, асуулт (захиалагчийн өгснөөр, яг үгээр)"],
 "ad_history":{"spend":0,"days":0,"impressions":0,"clicks":0,"messages":0,"orders":0}|null,
