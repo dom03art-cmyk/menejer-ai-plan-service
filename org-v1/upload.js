@@ -124,6 +124,7 @@ router.post("/u/org/:token/done", express.json(), async (req, res) => {
     await M.setMeta(t.psid, { product: t.product, quote });
     await M.clearRejected(t.psid);
     await send(t.psid, doneText(t.product, s, rej));
+    try { await require("./flow").onQuote(t.psid, t.product, quote); } catch (e) { console.warn("[org-upload] flow:", e.message); }
     if (process.env.ORG_QUOTE_WEBHOOK) {
       try {
         const r = await fetch(process.env.ORG_QUOTE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: t.psid, product: t.product, units: s.units, price: s.price, files: s.files.length }), signal: AbortSignal.timeout(15000) });

@@ -11,6 +11,7 @@ const { fbText } = require("../plan-v2/util");
 const { newUsage, withUsage } = require("../plan-v2/claude");
 const router = express.Router();
 router.use(upload);
+router.use(require("./flow"));
 const jobs = new Map(), activeByPsid = new Map(), queue = []; let running = 0;
 const MAX_PARALLEL = Number(process.env.ORG_MAX_PARALLEL || 1);
 const hook = (body) => process.env.ORG_DONE_WEBHOOK ? fetch(process.env.ORG_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) }).catch(() => { }) : Promise.resolve();
