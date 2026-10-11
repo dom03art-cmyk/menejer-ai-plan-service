@@ -30,10 +30,26 @@ async function yieldToOthers(job) {
   }
 }
 
+// Багц: хэсгүүдийг дараалан, нэг материалаар (нэг удаа уншиж) боловсруулна. Хэсэг бүр бэлэн болмогц тусдаа илгээгдэнэ.
+async function runJob(job) {
+  const parts = PRODUCTS[job.product] && PRODUCTS[job.product].parts;
+  if (!parts) return runOrg(job);
+  job.subs = {}; let raw = null;
+  for (const part of parts) {
+    const sub = { ...job, id: `${job.id}-${part}`, product: part, raw, subs: undefined };
+    job.subs[part] = sub; job.step = `${PRODUCTS[part].name}: эхэлж байна`;
+    const timer = setInterval(() => { job.step = `${PRODUCTS[part].name}: ${sub.step || ""}`; }, 5000);
+    try { await runOrg(sub); } finally { clearInterval(timer); }
+    raw = sub.raw;
+  }
+  job.result = Object.fromEntries(parts.map((p) => [p, job.subs[p].result]));
+  job.qc = parts.flatMap((p) => (job.subs[p].qc || []).map((q) => `${p}: ${q}`));
+}
+
 function pump() {
   while (running < MAX_PARALLEL && queue.length) {
     const job = queue.shift(); running++; job.status = "running"; job.usage = newUsage();
-    yieldToOthers(job).then(() => withUsage(job.usage, () => runOrg(job))).then(() => { job.status = "done"; })
+    yieldToOthers(job).then(() => withUsage(job.usage, () => runJob(job))).then(() => { job.status = "done"; })
       .catch(async (e) => {
         if (shuttingDown) return;
         const name = PRODUCTS[job.product] ? PRODUCTS[job.product].name : job.product;
@@ -62,7 +78,7 @@ router.post("/org/jobs", express.json({ limit: "5mb" }), auth, async (req, res) 
   const { psid, conversation, year, input, digest, A, notify = true } = req.body || {};
   let product = (req.body || {}).product;
   if (!product && psid) { const meta = await M.getMeta(psid).catch(() => null); product = meta && meta.product; }
-  if (!PRODUCTS[product]) return res.status(400).json({ error: "product буруу (plan | report_dept | report_dir)" });
+  if (!PRODUCTS[product]) return res.status(400).json({ error: "product буруу (plan | report_dept | report_dir | bundle)" });
   if (!input && psid) { const files = await M.listFiles(psid).catch(() => []); if (!files.length && String(conversation || "").trim().length < 200) return res.status(400).json({ error: "материал алга (захиалагч файл илгээгээгүй эсвэл хадгалах хугацаа дууссан)" }); }
   if (!input && !psid) return res.status(400).json({ error: "psid эсвэл input шаардлагатай" });
   if (psid && activeByPsid.has(psid)) return res.status(202).json({ job_id: activeByPsid.get(psid), status: "already_running" });
@@ -76,7 +92,8 @@ router.get("/org/status", auth, (req, res) => res.json({ enabled: process.env.OR
 router.get("/org/jobs/:id", auth, (req, res) => { const j = jobs.get(req.params.id); if (!j) return res.status(404).json({ error: "not found" });
   res.json({ id: j.id, product: j.product, status: j.status, step: j.step, error: j.error, result: j.result, qc: j.qc, filename: j.filename }); });
 router.get("/org/jobs/:id/file", auth, (req, res) => {
-  const j = jobs.get(req.params.id), t = req.query.type || "docx";
+  let j = jobs.get(req.params.id); const t = req.query.type || "docx";
+  if (j && j.subs) j = j.subs[req.query.part || "report_dir"];
   const map = { docx: ["buffer", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".docx"], pdf: ["pdf", "application/pdf", ".pdf"], xlsx: ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx"] }[t];
   if (!map || !j || !j[map[0]]) return res.status(404).json({ error: "file not ready" });
   res.set({ "Content-Type": map[1], "Content-Disposition": `attachment; filename="${j.filename.replace(/\.docx$/, map[2])}"` }).send(j[map[0]]);

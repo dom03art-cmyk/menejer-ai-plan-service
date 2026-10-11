@@ -5,6 +5,8 @@ const PRODUCTS = {
   report_dept: { name: "Хэлтэс, албан тушаалын ажлын тайлан", tiers: [79900, 99900, 129900], extra: 30000 },
   report_dir: { name: "Гүйцэтгэх захирлын тайлан", tiers: [149900, 199900, 249900], extra: 50000 },
   plan: { name: "Байгууллагын жилийн төлөвлөгөө, төсөв", tiers: [199900, 249900, 299900], extra: 50000 },
+  // Багц: нэг материалаар хоёуланг нь хийнэ; үнэ = хэсгүүдийн үнийн нийлбэрээс 15% хөнгөлөөд ...9 900₮ болгож дээш дугуйлна
+  bundle: { name: "Гүйцэтгэх захирлын тайлан + жилийн төлөвлөгөө (багц)", parts: ["report_dir", "plan"], discount: 0.15 },
 };
 
 function kindOf(name, mime) {
@@ -83,6 +85,11 @@ async function countFile({ buf, name, mime }) {
 function priceFor(product, units) {
   const p = PRODUCTS[product]; if (!p) throw new Error("Үл мэдэгдэх бүтээгдэхүүн: " + product);
   const u = Math.ceil(Number(units) || 0);
+  if (p.parts) {
+    const qs = p.parts.map((x) => priceFor(x, u)), full = qs.reduce((a, q) => a + q.price, 0);
+    const price = Math.ceil(full * (1 - p.discount) / 10000) * 10000 - 100;
+    return { product, name: p.name, units: u, tier: qs[0].tier, price, full, saving: full - price, parts: qs };
+  }
   let price, tier;
   if (u <= 20) { price = p.tiers[0]; tier = "20 хүртэл"; }
   else if (u <= 50) { price = p.tiers[1]; tier = "21–50"; }

@@ -39,7 +39,8 @@ async function runOrg(job, log = console.log) {
   if (job.conversation) await guard(job.conversation);
 
   step("1/8 материал уншиж байна");
-  const raw = job.psid && !job.input ? await extractRaw(job.psid, log) : { docs: [], text: "", files: [] };
+  const raw = job.raw || (job.psid && !job.input ? await extractRaw(job.psid, log) : { docs: [], text: "", files: [] });
+  job.raw = raw; // багцад дараагийн хэсэг дахин уншихгүй
   if (raw.text) await guard(raw.text.slice(0, 15000));
   if (!job.input && !raw.docs.length && String(job.conversation || "").trim().length < 200) throw new Error("Уншиж болох материал алга (файл уншигдсангүй)");
 

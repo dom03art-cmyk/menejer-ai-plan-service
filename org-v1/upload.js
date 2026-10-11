@@ -17,7 +17,7 @@ const BASE = () => process.env.PUBLIC_URL || "https://menejer-ai-plan-service.on
 const LINK_DAYS = () => Number(process.env.ORG_LINK_TTL_DAYS || process.env.ORG_FILES_TTL_DAYS || 14);
 
 // ---- Токен: psid.productCode.expiry(base36).HMAC — plan-v2-ийн токеноос тусдаа нууц угтвартай ----
-const CODES = { plan: "p", report_dept: "d", report_dir: "r" };
+const CODES = { plan: "p", report_dept: "d", report_dir: "r", bundle: "b" };
 const BY_CODE = Object.fromEntries(Object.entries(CODES).map(([k, v]) => [v, k]));
 const secret = () => "org-v1:" + (process.env.UPLOAD_SECRET || process.env.API_KEY || "dev");
 const sign = (s) => crypto.createHmac("sha256", secret()).update("org|" + s).digest("hex").slice(0, 24);
@@ -52,14 +52,14 @@ async function send(psid, text) {
 }
 async function summary(psid, product) {
   const files = await M.listFiles(psid), units = M.totalUnits(files), q = priceFor(product, units);
-  return { files, units, price: q.price, priceText: fmtMoney(q.price), tier: q.tier, name: q.name };
+  return { files, units, price: q.price, priceText: fmtMoney(q.price) + (q.full ? ` (тусад нь ${fmtMoney(q.full)})` : ""), tier: q.tier, name: q.name, full: q.full || null };
 }
 const pub = (f) => ({ id: f.id, name: f.name, units: f.units, note: f.note, kind: f.kind, size: f.size });
 
 router.post("/org/upload-link", express.json(), auth, async (req, res) => {
   const { psid, product } = req.body || {};
   if (!psid) return res.status(400).json({ error: "psid" });
-  if (!PRODUCTS[product]) return res.status(400).json({ error: "product: plan | report_dept | report_dir" });
+  if (!PRODUCTS[product]) return res.status(400).json({ error: "product: plan | report_dept | report_dir | bundle" });
   await M.setMeta(psid, { product }).catch(e => console.warn("[org-upload] meta:", e.message));
   res.json({ url: `${BASE()}/u/org/${tokenFor(psid, product)}` });
 });
@@ -142,7 +142,7 @@ function doneText(product, s, rej) {
   if (s.files.length) parts.push(`Хүлээн авсан материал (${s.files.length} файл):\n` + s.files.map((f, i) => `${i + 1}. ${f.name} — ${f.units} хуудас${f.note ? ` (${f.note})` : ""}`).join("\n"));
   else parts.push("Та материал илгээгээгүй байна. Төлөвлөгөөг таны Messenger-ээр өгсөн мэдээлэлд үндэслэн боловсруулна.");
   if (rej.length) parts.push(`Хүлээн аваагүй файл (${rej.length}):\n` + rej.map((f, i) => `${i + 1}. ${f.name} — ${f.reason}`).join("\n"));
-  parts.push(`Таны илгээсэн материалын хэмжээ: ${s.units} хуудас\nҮнийн шатлал: ${s.tier} хуудас\nҮнэ: ${fmtMoney(s.price)}`);
+  parts.push(`Таны илгээсэн материалын хэмжээ: ${s.units} хуудас\nҮнийн шатлал: ${s.tier} хуудас\n${s.full ? `Тусад нь авбал: ${fmtMoney(s.full)}\nБагцын үнэ (15% хөнгөлөлт): ${fmtMoney(s.price)}` : `Үнэ: ${fmtMoney(s.price)}`}`);
   parts.push("Материалын агуулгыг төлбөр баталгаажсаны дараа л уншиж боловсруулна. Төлбөр хийхээс өмнө нэмэлт файл байвал мөн л холбоосоор илгээж болно, үнэ дахин тооцогдоно.");
   return parts.join("\n\n");
 }
@@ -166,6 +166,8 @@ const COPY = {
     list: ["Өмнөх жилийн үйл ажиллагааны төлөвлөгөө", "Өмнөх жилийн тайлан (үйл ажиллагаа, санхүү)", "Орлого, зарлагын задаргаа (Excel)", "Орон тоо, цалингийн мэдээлэл", "Байгууллагын бүтэц, хэлтсүүд", "Стратеги, зорилт, ТУЗ/удирдлагын шийдвэр (байвал)"] },
   report_dept: { title: "Хэлтэс, албан тушаалын тайланд материал илгээх", intro: "Тайлангийн хугацаанд хийсэн ажлаа харуулах материалаа илгээнэ үү. Тоо баримтыг зөвхөн таны материалаас авна.",
     list: ["Ажлын төлөвлөгөө (жил, улирал, сар)", "Сарын, улирлын тайлангууд", "Гүйцэтгэлийн хүснэгт (Excel)", "KPI, шалгуур үзүүлэлтийн биелэлт", "Хурлын тэмдэглэл, шийдвэр", "Зураг, баримт (арга хэмжээ, ажлын үр дүн)"] },
+  bundle: { title: "Захирлын тайлан ба жилийн төлөвлөгөөнд материал илгээх", intro: "Нэг материалаар өнгөрсөн жилийн захирлын тайлан ба ирэх жилийн төлөвлөгөө, төсвийг хоёуланг нь боловсруулна. Тоо баримтыг зөвхөн таны материалаас авна.",
+    list: ["Санхүүгийн тайлан (баланс, орлого үр дүн, мөнгөн гүйлгээ)", "Борлуулалт, орлого зарлагын задаргаа (Excel)", "Хэлтсүүдийн тайлан, төлөвлөгөөний биелэлт, KPI", "Орон тоо, цалингийн мэдээлэл, байгууллагын бүтэц", "ТУЗ-ийн шийдвэр, стратеги, ирэх жилийн зорилт", "Төсөл, хөрөнгө оруулалт, эрсдэлийн мэдээлэл (байвал)"] },
   report_dir: { title: "Гүйцэтгэх захирлын тайланд материал илгээх", intro: "ТУЗ-д танилцуулах тайланд байгууллагын тоо баримтыг зөвхөн таны материалаас авна.",
     list: ["Санхүүгийн тайлан (баланс, орлого үр дүн, мөнгөн гүйлгээ)", "Борлуулалт, орлогын задаргаа", "Хэлтсүүдийн тайлан", "Төлөвлөгөөний биелэлт, KPI", "ТУЗ-ийн шийдвэр, өмнөх хурлын тэмдэглэл", "Төсөл, хөрөнгө оруулалт, эрсдэлийн мэдээлэл (байвал)"] },
 };
