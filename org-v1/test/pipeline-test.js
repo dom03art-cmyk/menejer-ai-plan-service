@@ -4,7 +4,7 @@ const fs = require("fs"), path = require("path");
 const { runOrg } = require("../pipeline");
 const out = process.argv[2] || "/tmp";
 (async () => {
-  for (const [product, file] of [["plan", "plan-sample.json"], ["report_dept", "kpi-sample.json"], ["report_dir", "kpi-sample.json"]]) {
+  for (const [product, file] of [["plan", "plan-sample.json"], ["report_dept", "kpi-sample.json"], ["report_dir", "kpi-sample.json"], ["plan_dept", "kpi-sample.json"]]) {
     const job = { id: product, product, input: JSON.parse(fs.readFileSync(path.join(__dirname, file), "utf8")) };
     await runOrg(job, () => { });
     fs.writeFileSync(path.join(out, product + ".docx"), job.buffer);
