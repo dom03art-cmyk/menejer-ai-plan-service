@@ -3,7 +3,7 @@
 const { extractRaw } = require("./rawtext");
 const { planIntake, reportIntake } = require("./intake");
 const plancalc = require("./plancalc"), planfin = require("./planfin"), planxlsx = require("./planxlsx");
-const kpicalc = require("./kpicalc"), kpifin = require("./kpifin"), kpixlsx = require("./kpixlsx");
+const kpicalc = require("./kpicalc"), kpifin = require("./kpifin"), kpixlsx = require("./kpixlsx"), kpiplanxlsx = require("./kpiplanxlsx");
 const { research } = require("./research");
 const { writeAll, writeAllMock } = require("./chapters");
 const { finalize } = require("./blocks");
@@ -20,7 +20,7 @@ const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
 
 const TR = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "yo", ж: "j", з: "z", и: "i", й: "i", к: "k", л: "l", м: "m", н: "n", о: "o", ө: "u", п: "p", р: "r", с: "s", т: "t", у: "u", ү: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh", щ: "sh", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya" };
 const slug = (s) => [...String(s || "org").toLowerCase()].map((c) => TR[c] ?? c).join("").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "org";
-const SUFFIX = { plan: "tuluvlugu", report_dept: "tailan", report_dir: "zakhirlyn-tailan" };
+const SUFFIX = { plan: "tuluvlugu", report_dept: "tailan", report_dir: "zakhirlyn-tailan", plan_dept: "khelt-tuluvlugu" };
 
 function qc({ product, written, extra, warnings }) {
   const issues = [...extra];
@@ -91,6 +91,8 @@ async function runOrg(job, log = console.log) {
   const Y = plan ? plancalc.normalizeCfg(cfg).year : res.year;
   const meta = plan
     ? { title: `${Y} ОНЫ ҮЙЛ АЖИЛЛАГААНЫ ТӨЛӨВЛӨГӨӨ, ТӨСӨВ`, subtitle: "", period: `${Y} оны 1-р сар – 12-р сар`, header: `${A.org_name} · ${Y} оны төлөвлөгөө` }
+    : P === "plan_dept"
+      ? { title: `${res.year + 1} ОНЫ АЖЛЫН ТӨЛӨВЛӨГӨӨ`, subtitle: A.unit_name || A.reporter_title || "", period: `${res.year + 1} оны 1-р сар – 12-р сар`, header: `${A.org_name}${A.unit_name ? " · " + A.unit_name : ""} · ${res.year + 1} оны төлөвлөгөө` }
     : P === "report_dir"
       ? { title: "ГҮЙЦЭТГЭХ ЗАХИРЛЫН ТАЙЛАН", subtitle: "Төлөөлөн удирдах зөвлөлд", period: res.period, periodLabel: "Тайлант хугацаа: ", header: `${A.org_name} · Гүйцэтгэх захирлын тайлан` }
       : { title: "АЖЛЫН ТАЙЛАН", subtitle: A.unit_name || A.reporter_title || "", period: res.period, periodLabel: "Тайлант хугацаа: ", header: `${A.org_name}${A.unit_name ? " · " + A.unit_name : ""} · Ажлын тайлан` };
@@ -105,7 +107,7 @@ async function runOrg(job, log = console.log) {
   step("7/8 Excel");
   job.xlsx = null;
   try {
-    const x = plan ? await planxlsx.makeModel(A, cfg, res) : await kpixlsx.makeModel(A, m, res);
+    const x = plan ? await planxlsx.makeModel(A, cfg, res) : P === "plan_dept" ? await kpiplanxlsx.makeModel(A, m, res) : await kpixlsx.makeModel(A, m, res);
     if (x.ok) job.xlsx = x.buffer; else { fz.issues.push(`Excel тулгалт зөрсөн (${x.bad.length}/${x.total}) — Excel илгээгээгүй`); log(`[org ${job.id}] Excel зөрүү: ${JSON.stringify(x.bad.slice(0, 5))}`); }
   } catch (e) { fz.issues.push("Excel үүсгэж чадсангүй"); log(`[org ${job.id}] Excel алдаа: ${e.message}`); }
 
@@ -126,16 +128,17 @@ async function runOrg(job, log = console.log) {
     const name0 = PRODUCTS[P] ? PRODUCTS[P].name : "баримт бичиг", name = name0.charAt(0).toLowerCase() + name0.slice(1);
     const skipped = job.result.files_skipped.length ? `\n\n📎 Уншиж чадаагүй файл: ${job.result.files_skipped.slice(0, 6).join("; ")}.` : "";
     const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
-    const xl = xlsxSent ? (plan ? " Excel файлын шар нүднүүдэд тоогоо өөрчлөхөд төсөв автоматаар дахин тооцогдоно; «Гүйцэтгэл» хуудсанд сар бүрийн бодит дүнгээ бичээрэй." : " Excel файлд үзүүлэлт бүрийн сарын тоо, биелэлтийн тооцоо томьёотойгоор байгаа.") : "";
-    const scopeNote = P === "report_dept" && A.org_wide ? `\n\nℹ️ Таны илгээсэн материал байгууллагын хэмжээнийх (санхүүгийн тайлан, олон хэлтэс эсвэл ТУЗ-ийн шийдвэр) байсан тул энэ тайланг зөвхөн «${A.unit_name || "тайлагнагч нэгж"}»-ийн хүрээнд бичлээ. Байгууллагын бүтэн дүгнэлт, санхүүгийн шинжилгээ, ТУЗ-д тавих асуудал хэрэгтэй бол «Гүйцэтгэх захирлын тайлан» үйлчилгээ тохиромжтой.` : "";
+    const pd = P === "plan_dept";
+    const xl = xlsxSent ? (pd ? " Excel файлын «KPI хяналт» хуудсанд зорилт, сар бүрийн гүйцэтгэлээ бичихэд биелэлт автоматаар бодогдоно." : plan ? " Excel файлын шар нүднүүдэд тоогоо өөрчлөхөд төсөв автоматаар дахин тооцогдоно; «Гүйцэтгэл» хуудсанд сар бүрийн бодит дүнгээ бичээрэй." : " Excel файлд үзүүлэлт бүрийн сарын тоо, биелэлтийн тооцоо томьёотойгоор байгаа.") : "";
+    const scopeNote = (P === "report_dept" || pd) && A.org_wide ? `\n\nℹ️ Таны илгээсэн материал байгууллагын хэмжээнийх (санхүүгийн тайлан, олон хэлтэс эсвэл ТУЗ-ийн шийдвэр) байсан тул энэ ${pd ? "төлөвлөгөө" : "тайлан"}г зөвхөн «${A.unit_name || "тайлагнагч нэгж"}»-ийн хүрээнд бичлээ. Байгууллагын бүтэн дүгнэлт, санхүүгийн шинжилгээ, ТУЗ-д тавих асуудал хэрэгтэй бол «Гүйцэтгэх захирлын тайлан» үйлчилгээ тохиромжтой.` : "";
     if (scopeNote && process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `ℹ️ Хэлтсийн тайлангийн захиалгад байгууллагын хэмжээний материал ирлээ (${A.org_name}, psid ${job.psid}). Тайланг нэг нэгжийн хүрээнд бичиж, захирлын тайланг санал болгосон.`).catch(() => { });
-    const where = plan ? "Эхлэх газар: 1.2 «Ирэх жилийн гол чиглэл, зорилт» ба 1.4 «Эхний 30 хоногт хийх 5 ажил»." : "Эхлэх газар: 1-р бүлэг (товч дүгнэлт) ба хавсралтын «Баталгаажуулах, нөхөх зүйлс» хүснэгт.";
+    const where = pd ? "Эхлэх газар: 1.1 «Ирэх оны гол чиглэл» ба 3.2 «Зорилт ба KPI»." : plan ? "Эхлэх газар: 1.2 «Ирэх жилийн гол чиглэл, зорилт» ба 1.4 «Эхний 30 хоногт хийх 5 ажил»." : "Эхлэх газар: 1-р бүлэг (товч дүгнэлт) ба хавсралтын «Баталгаажуулах, нөхөх зүйлс» хүснэгт.";
     await fbText(job.psid, `✅ Таны захиалсан «${name0}» бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.${xl} Word файлыг нээхэд гарчгийн хуудасны дугаарыг шинэчлэх эсэхийг асуувал «Тийм» гэж дарна уу.
 
 ⚠️ Чухал сануулга: Энэ баримтыг таны илгээсэн материал${plan ? " болон нээлттэй эх сурвалжийн судалгаа" : ""}нд үндэслэн хиймэл оюун ухаан боловсруулсан. Батлуулах, хүргүүлэхээс өмнө заавал уншиж шалгана уу:
 1. Тоо, нэр, огноо материалтай таарч байгаа эсэх.
-2. «[${plan ? "Байгууллага бөглөнө" : "Тайлагнагч нөхнө"}]» гэж тэмдэглэсэн хэсгүүдийг нөхөх.
-3. ${plan ? "Таамаглалын жагсаалтыг (хавсралт) удирдлагаар баталгаажуулах." : "Материалд зөрүүтэй байсан тоог (хавсралт) тулгаж засах."}
+2. «[${pd ? "Хэлтэс нөхнө" : plan ? "Байгууллага бөглөнө" : "Тайлагнагч нөхнө"}]» гэж тэмдэглэсэн хэсгүүдийг нөхөх.
+3. ${pd ? "Зорилтот түвшнийг (санал) удирдлагатай тохиролцож баталгаажуулах." : plan ? "Таамаглалын жагсаалтыг (хавсралт) удирдлагаар баталгаажуулах." : "Материалд зөрүүтэй байсан тоог (хавсралт) тулгаж засах."}
 
 ${where}${scopeNote}${skipped}${missing}`);
   }

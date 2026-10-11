@@ -163,7 +163,7 @@ async function reportIntake({ conversation = "", docs = [], product = "report_de
   }
   const year = Number(meta.year) || new Date().getFullYear();
   const m = { org_name: meta.org_name || "Байгууллага", unit_name: product === "report_dir" ? "" : (meta.unit_name || ""), year, months_covered: months.length ? months : undefined, indicators, issues: issues.slice(0, 30) };
-  const orgWide = product === "report_dept" && notes.some((n) => n.meta && (n.meta.scope_org === true || n.meta.scope_org === "true"));
+  const orgWide = (product === "report_dept" || product === "plan_dept") && notes.some((n) => n.meta && (n.meta.scope_org === true || n.meta.scope_org === "true"));
   const A = { org_name: m.org_name, unit_name: meta.unit_name || "", reporter_title: meta.reporter_title || "", year, org_wide: orgWide, brand: { name: m.org_name, slogan: "" }, missing_info: [], assumed_fields: [] };
   log(`[org-intake] ${indicators.length} үзүүлэлт, ${issues.length} тодруулах зүйл`);
   return { A, m, digest };
