@@ -13,6 +13,7 @@ const { makeModel } = require("./xlsxModel");
 const OUTLINE = require("./outline");
 const { fbText, fbFile } = require("../plan-v2/util");
 const { pickTheme } = require("../plan-v2/theme");
+const { checkContent, blockedError, CUSTOMER_MSG } = require("../plan-v2/guard");
 const MOCK = () => process.env.MKT_MOCK === "1";
 
 const TITLES = { product: "МАРКЕТИНГИЙН ТӨЛӨВЛӨГӨӨ", organization: "МАРКЕТИНГ, ХАРИЛЦААНЫ ТӨЛӨВЛӨГӨӨ", person: "ХУВИЙН БРЭНДИЙН МАРКЕТИНГИЙН ТӨЛӨВЛӨГӨӨ" };
@@ -38,6 +39,10 @@ function qc({ A, written, fin, calc, extra }) {
 
 async function runMarketing(job, log = console.log) {
   const t0 = Date.now(); const step = (s) => { job.step = s; log(`[mkt ${job.id}] ${s} (${Math.round((Date.now() - t0) / 1000)}с)`); };
+  if (job.conversation) {
+    const g = await checkContent(job.conversation);
+    if (!g.allowed) { log(`[mkt ${job.id}] ХААВ: ${g.category} — ${g.reason}`); throw blockedError(g); }
+  }
   step("1/7 таамаглал, тооцоо");
   const A = job.assumptions ? normalize(job.assumptions) : await extract(job.conversation);
   const cfg = toCalcConfig(A), calc = calculate(cfg), fin = build(A, cfg, calc);

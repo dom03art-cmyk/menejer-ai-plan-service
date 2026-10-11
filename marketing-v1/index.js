@@ -28,6 +28,13 @@ function pump() {
     yieldToPlan(job).then(() => withUsage(job.usage, () => runMarketing(job))).then(() => { job.status = "done"; })
       .catch(async (e) => {
         if (shuttingDown) return;
+        if (e.status === "blocked") {
+          job.status = "blocked"; job.error = e.message; console.warn(`[mkt ${job.id}] ХААГДСАН`, e.message);
+          if (job.psid) await fbText(job.psid, require("../plan-v2/guard").CUSTOMER_MSG).catch(() => { });
+          if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `⛔ Маркетингийн захиалгыг хаалаа (job ${job.id}, psid ${job.psid || "-"}): ${String(e.message).slice(0, 300)}. Төлбөрийг шалгаж, захиалагчтай холбогдоно уу.`).catch(() => { });
+          await hook({ job_id: job.id, psid: job.psid, status: "blocked", error: e.message });
+          return;
+        }
         job.status = "failed"; job.error = e.message; console.error(`[mkt ${job.id}] АЛДАА`, e);
         const credit = /credit balance/i.test(e.message || "");
         if (job.psid) await fbText(job.psid, "Уучлаарай, маркетингийн төлөвлөгөө боловсруулахад техникийн саатал гарлаа. Манай ажилтан тантай удахгүй холбогдоно.").catch(() => { });
