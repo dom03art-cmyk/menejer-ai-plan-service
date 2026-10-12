@@ -296,7 +296,7 @@ async function handle({ psid, text, payload, attachments }) {
   }
   if (payload === "FLOW_MENU") { await setF(psid, { s: "left" }); return toMenu(psid); }
   if ((payload === "FLOW_REV" || payload.startsWith("FLOW_REVP_")) && !["processing", "payment_review"].includes(f.s)) return payload === "FLOW_REV" ? revMenu(psid) : revStart(psid, payload.slice(10));
-  if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { if (f.qpay && f.qpay.no && f.s === "awaiting_payment") await QP.cancelInvoice(f.qpay.no).catch(() => { }); await setF(psid, { s: "left" }); return toMenu(psid, "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
+  if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { const hadQr = !!(f.qpay && f.qpay.no && f.s === "awaiting_payment"); if (hadQr) await QP.cancelInvoice(f.qpay.no).catch(() => { }); await setF(psid, { s: "left" }); return toMenu(psid, hadQr ? `Цуцаллаа.\n\n${QP_VOID.replace(" Дахин захиалах бол доорх товчийг дарна уу.", "")}\n\nӨөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу.` : "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
   if (payload.startsWith("FLOW_P_") && PRODUCTS[payload.slice(7)]) return askPeriod(psid, payload.slice(7));
   if (payload.startsWith("FLOW_T_") && f.s === "choose" && f.product) return pickType(psid, f, payload.slice(7));
   if (payload.startsWith("FLOW_N_") && f.s === "choose" && f.product && f.ptype) return pickN(psid, f, Number(payload.slice(7)));
@@ -424,10 +424,18 @@ const bizPaid = async (rec) => {
   }
 };
 QP.onPaid("biz", bizPaid); QP.onPaid("bizrev", bizPaid);
+const QP_VOID = "⚠️ Дээрх QPay QR код болон төлбөрийн холбоос хүчингүй боллоо. Түүгээр төлбөр бүү хийгээрэй. Дахин захиалах бол доорх товчийг дарна уу.";
 // Make дуудна (бизнес төсөл цуцлахад): POST /qpay/cancel {psid} → нээлттэй нэхэмжлэхийг цуцална
 router.post("/qpay/cancel", express.json(), auth, async (req, res) => {
   const psid = String((req.body || {}).psid || ""); if (!psid) return res.status(400).json({ ok: false });
-  try { const c = await QP.cancelOpen(psid, ["biz", "bizrev"]); if (c.length) console.log(`[qpay] ${psid}: ${c.length} нэхэмжлэх цуцлагдлаа`); res.json({ ok: true, cancelled: c.length }); }
+  try {
+    const c = await QP.cancelOpen(psid, ["biz", "bizrev"]);
+    if (c.length) {
+      console.log(`[qpay] ${psid}: ${c.length} нэхэмжлэх цуцлагдлаа`);
+      await send(psid, QP_VOID, [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]]);
+    }
+    res.json({ ok: true, cancelled: c.length });
+  }
   catch (e) { console.warn("[qpay] cancel:", e.message); res.json({ ok: false }); }
 });
 // Make дуудна: POST /qpay/invoice {psid, amount, kind: "biz"|"bizrev"} → захиалагчид QR ба холбоос илгээнэ
