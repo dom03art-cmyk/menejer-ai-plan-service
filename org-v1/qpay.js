@@ -65,6 +65,18 @@ async function api(method, path, body) {
   return j;
 }
 
+// Callback URL-д захиалагч, төрөл, дүнг гарын үсэгтэй хадгална: Redis-ийн мэдээлэл устсан ч (сервер дахин ассан г.м.)
+// төлбөр орсныг таньж, админд мэдэгдэх эсвэл бизнес төслийг автоматаар үргэлжлүүлэх боломжтой.
+const cbSecret = () => process.env.QPAY_CB_SECRET || process.env.API_KEY || "dev";
+const cbSig = (no, psid, kind, amount) => crypto.createHmac("sha256", cbSecret()).update(`${no}|${psid}|${kind}|${amount}`).digest("hex").slice(0, 24);
+const cbQuery = ({ no, psid, kind, amount }) => new URLSearchParams({ no, p: psid, k: kind, a: String(amount), s: cbSig(no, psid, kind, amount) }).toString();
+function cbRecover(q) {
+  const no = String(q.no || ""), psid = String(q.p || ""), kind = String(q.k || ""), amount = Number(q.a || 0), s = String(q.s || "");
+  if (!psid || !kind || !(amount > 0) || s.length !== 24) return null;
+  const ok = crypto.timingSafeEqual(Buffer.from(s), Buffer.from(cbSig(no, psid, kind, amount)));
+  return ok ? { no, psid, kind, amount } : null;
+}
+
 // ---- нэхэмжлэх үүсгэх ----
 // kind: "flow" (маркетинг/тайлан/төлөвлөгөө — сервер өөрөө баталгаажуулна) | "biz" | "bizrev" (бизнес төсөл, Make)
 async function createInvoice({ psid, amount, description, kind = "flow", meta = {} }) {
@@ -75,7 +87,7 @@ async function createInvoice({ psid, amount, description, kind = "flow", meta = 
   const body = {
     invoice_code: process.env.QPAY_INVOICE_CODE, sender_invoice_no: no, invoice_receiver_code: "terminal",
     invoice_description: String(description || "Менежер AI үйлчилгээ").slice(0, 200), amount,
-    callback_url: `${PUBLIC()}/qpay/callback?no=${encodeURIComponent(no)}`,
+    callback_url: `${PUBLIC()}/qpay/callback?${cbQuery({ no, psid: String(psid), kind, amount })}`,
   };
   const j = await api("POST", "/v2/invoice", body);
   if (!j.invoice_id) throw new Error("QPay invoice_id ирсэнгүй");
@@ -122,7 +134,27 @@ async function callback(req, res) {
   const no = String(req.query.no || "").slice(0, 60);
   res.status(200).send("SUCCESS");
   if (!/^[A-Z0-9]{6,60}$/.test(no) || !enabled()) return;
-  settle(no, "callback").catch((e) => console.warn("[qpay] callback шалгалт:", e.message));
+  try {
+    const r = await settle(no, "callback");
+    if (r === "missing") await lostRecord(req.query, { ...(req.body || {}) });
+  } catch (e) { console.warn("[qpay] callback шалгалт:", e.message); }
+}
+// Нэхэмжлэхийн мэдээлэл алга (Redis устсан): payment_id ирсэн бол QPay-аас шалгаж үргэлжлүүлнэ, үгүй бол админд мэдэгдэнэ
+const lostSeen = new Set();
+async function lostRecord(q, body) {
+  const info = cbRecover(q);
+  if (!info || lostSeen.has(info.no)) return;
+  lostSeen.add(info.no);
+  console.warn(`[qpay] ${info.no}: нэхэмжлэхийн мэдээлэл алга — сэргээж байна (${info.kind}, ${info.psid})`);
+  const pid = q.payment_id || q.qpay_payment_id || body.payment_id || body.qpay_payment_id;
+  let paid = 0;
+  if (pid) { try { const p = await api("GET", `/v2/payment/${encodeURIComponent(String(pid))}`); if (String(p.payment_status || "").toUpperCase() === "PAID") paid = Number(p.payment_amount || 0); } catch (e) { console.warn("[qpay] payment шалгалт:", e.message); } }
+  const rec = { ...info, id: null, status: "paid", paid: paid || info.amount, at: Date.now(), recovered: true };
+  if (paid + 0.5 >= info.amount && (info.kind === "biz" || info.kind === "bizrev") && handlers[info.kind]) { await saveInv(rec); return handlers[info.kind](rec).catch((e) => console.error("[qpay] handler", e)); }
+  try {
+    const { fbText } = require("../plan-v2/util");
+    if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `⚠️ QPay-ээс төлбөрийн мэдэгдэл ирсэн боловч захиалгын мэдээлэл серверт алга (сервер дахин ассан байж магадгүй).\nЗахиалагч: ${info.psid}\nТөрөл: ${info.kind}\nДүн: ${info.amount}₮\nНэхэмжлэх: ${info.no}\n\nbusiness.qpay.mn-ээс гүйлгээг шалгаад захиалагчтай холбогдож гараар үргэлжлүүлнэ үү.`);
+  } catch (_) { }
 }
 router.get("/qpay/callback", callback);
 router.post("/qpay/callback", express.json({ limit: "100kb" }), callback);
@@ -163,4 +195,4 @@ router.get("/qpay/test", async (req, res) => {
 // Зөвхөн манай хадгалсан төлөвийг уншина (QPay руу дуудахгүй)
 router.get("/qpay/test/status/:no", async (req, res) => { const r = await getInv(String(req.params.no).slice(0, 60)).catch(() => null); res.json({ status: r && r.kind === "test" ? r.status : "missing" }); });
 
-module.exports = { router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };
+module.exports = { cbQuery, cbRecover, router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };
