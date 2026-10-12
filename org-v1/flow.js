@@ -50,7 +50,7 @@ const ORG_BTN = [["1. Тайлан", "FLOW_P_report_dir"], ["2. Төлөвлөг
 const PICK = { group: ["G:dept", "G:org"], dept: ["report_dept", "plan_dept", "bundle_dept"], org: ["report_dir", "plan", "bundle"] };
 const BTN = { group: GROUP_BTN, dept: DEPT_BTN, org: ORG_BTN };
 const NUMHINT = "Товч дарах эсвэл дугаарыг нь (1, 2, 3) бичээд илгээж болно.";
-const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, text, MENU); return "selecting_type"; };
+const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, `${text}\n\n👉 Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.`, MENU); return "selecting_type"; };
 
 const from = (p) => fmtMoney(priceFor(p, 5).price);
 async function showMenu(psid, menu) {
