@@ -94,10 +94,26 @@ async function createInvoice({ psid, amount, description, kind = "flow", meta = 
   const rec = { no, id: j.invoice_id, psid: String(psid), amount, kind, meta, status: "open", at: Date.now(), short: j.qPay_shortUrl || null };
   await saveInv(rec);
   if (j.qr_image) await put(`qpqr:${no}`, { png: j.qr_image });
+  // Нэг захиалагчид нэг төрлийн нэг л нээлттэй нэхэмжлэх: хуучныг цуцална (хуучин QR-аар төлөх боломжгүй болно)
+  const okey = `qpopen:${rec.psid}:${kind}`;
+  const prev = await get(okey).catch(() => null);
+  if (prev && prev.no && prev.no !== no) await cancelInvoice(prev.no).catch(() => { });
+  await put(okey, { no });
   return { ...rec, qrUrl: j.qr_image ? `${PUBLIC()}/qpay/qr/${no}.png` : null, urls: Array.isArray(j.urls) ? j.urls : [] };
+}
+// Захиалагч цуцлахад нээлттэй нэхэмжлэхийг цуцална — чатад үлдсэн QR-аар төлөх боломжгүй болно
+async function cancelOpen(psid, kinds) {
+  const out = [];
+  for (const kind of kinds) {
+    const o = await get(`qpopen:${psid}:${kind}`).catch(() => null);
+    if (o && o.no) { const r = await getInv(o.no); if (r && r.status === "open") { await cancelInvoice(o.no); out.push(o.no); } }
+  }
+  return out;
 }
 async function cancelInvoice(no) {
   const rec = await getInv(no); if (!rec || rec.status !== "open") return;
+  // Цуцлахаас өмнө төлөгдсөн эсэхийг шалгана: төлсөн бол цуцлахгүй, ердийнхөөрөө баталгаажуулна (маргаан гарахгүй)
+  try { const { paid } = await paidAmount(rec); if (paid + 0.5 >= rec.amount) { await settle(no, "cancel"); return; } } catch (e) { console.warn("[qpay] цуцлахын өмнөх шалгалт:", e.message); }
   rec.status = "cancelled"; await saveInv(rec);
   await api("DELETE", `/v2/invoice/${encodeURIComponent(rec.id)}`).catch((e) => console.warn("[qpay] цуцлах:", e.message));
 }
@@ -195,4 +211,4 @@ router.get("/qpay/test", async (req, res) => {
 // Зөвхөн манай хадгалсан төлөвийг уншина (QPay руу дуудахгүй)
 router.get("/qpay/test/status/:no", async (req, res) => { const r = await getInv(String(req.params.no).slice(0, 60)).catch(() => null); res.json({ status: r && r.kind === "test" ? r.status : "missing" }); });
 
-module.exports = { cbQuery, cbRecover, router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };
+module.exports = { cancelOpen, cbQuery, cbRecover, router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };

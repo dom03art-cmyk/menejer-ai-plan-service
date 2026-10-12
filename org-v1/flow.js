@@ -424,6 +424,12 @@ const bizPaid = async (rec) => {
   }
 };
 QP.onPaid("biz", bizPaid); QP.onPaid("bizrev", bizPaid);
+// Make дуудна (бизнес төсөл цуцлахад): POST /qpay/cancel {psid} → нээлттэй нэхэмжлэхийг цуцална
+router.post("/qpay/cancel", express.json(), auth, async (req, res) => {
+  const psid = String((req.body || {}).psid || ""); if (!psid) return res.status(400).json({ ok: false });
+  try { const c = await QP.cancelOpen(psid, ["biz", "bizrev"]); if (c.length) console.log(`[qpay] ${psid}: ${c.length} нэхэмжлэх цуцлагдлаа`); res.json({ ok: true, cancelled: c.length }); }
+  catch (e) { console.warn("[qpay] cancel:", e.message); res.json({ ok: false }); }
+});
 // Make дуудна: POST /qpay/invoice {psid, amount, kind: "biz"|"bizrev"} → захиалагчид QR ба холбоос илгээнэ
 router.post("/qpay/invoice", express.json(), auth, async (req, res) => {
   const { psid, amount, kind = "biz" } = req.body || {};
