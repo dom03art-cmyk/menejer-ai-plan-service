@@ -143,4 +143,24 @@ router.get("/qpay/status", async (req, res) => {
   res.json(out);
 });
 
+// ---- 100₮-ийн туршилтын хуудас: /qpay/test (хоногт 10 хүртэл, минутад 1) ----
+const testLog = []; const testOk = () => { const now = Date.now(); while (testLog.length && now - testLog[0] > 86400e3) testLog.shift(); return testLog.length < 10 && (!testLog.length || now - testLog[testLog.length - 1] > 60e3); };
+onPaid("test", async (rec) => { try { const { fbText } = require("../plan-v2/util"); if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `✅ QPay туршилт амжилттай: ${rec.paid || rec.amount}₮ орж, автомат баталгаажуулалт ажиллалаа.`); } catch (_) { } });
+const esc = (x) => String(x || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+router.get("/qpay/test", async (req, res) => {
+  res.set("Content-Type", "text/html; charset=utf-8");
+  const page = (body) => `<!doctype html><html lang="mn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QPay туршилт</title><style>body{font-family:system-ui,sans-serif;max-width:480px;margin:24px auto;padding:0 16px;color:#111;background:#fff}img{width:260px;max-width:100%}a.b{display:block;padding:10px;margin:6px 0;border:1px solid #ddd;border-radius:8px;text-decoration:none;color:#111}#st{font-size:20px;font-weight:600;margin:16px 0}</style></head><body>${body}</body></html>`;
+  if (!enabled()) return res.send(page("<p>QPay тохируулаагүй байна.</p>"));
+  if (!testOk()) return res.send(page("<p>Туршилтыг минутад 1, хоногт 10 удаа л хийнэ. Түр хүлээгээд дахин нээнэ үү.</p>"));
+  try {
+    testLog.push(Date.now());
+    const inv = await createInvoice({ psid: process.env.ADMIN_PSID || "test", amount: 100, kind: "test", description: "Менежер AI: QPay туршилт 100₮" });
+    const links = inv.urls.filter((u) => /^https?:|^[a-z]+:\/\//i.test(u.link || "")).map((u) => `<a class="b" href="${esc(u.link)}">${esc(u.description || u.name)}</a>`).join("");
+    res.send(page(`<h2>QPay туршилт — 100₮</h2><p>Банкны аппаараа уншуулна уу, эсвэл утсан дээрээ банкаа сонгоно уу.</p>${inv.qrUrl ? `<img src="${esc(inv.qrUrl)}" alt="QR">` : ""}<div id="st">⏳ Төлбөр хүлээж байна…</div>${inv.short ? `<a class="b" href="${esc(inv.short)}">QPay холбоос</a>` : ""}${links}
+<script>const no=${JSON.stringify(inv.no)};async function t(){try{const r=await fetch("/qpay/test/status/"+no);const j=await r.json();if(j.status==="paid"){document.getElementById("st").textContent="✅ Төлбөр орлоо — автомат баталгаажуулалт ажиллаж байна";return}}catch(e){}setTimeout(t,5000)}t();</script>`));
+  } catch (e) { console.warn("[qpay] туршилт:", e.message); res.send(page(`<p>QPay нэхэмжлэх үүсгэж чадсангүй: ${esc(String(e.message).slice(0, 120))}</p>`)); }
+});
+// Зөвхөн манай хадгалсан төлөвийг уншина (QPay руу дуудахгүй)
+router.get("/qpay/test/status/:no", async (req, res) => { const r = await getInv(String(req.params.no).slice(0, 60)).catch(() => null); res.json({ status: r && r.kind === "test" ? r.status : "missing" }); });
+
 module.exports = { router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };
