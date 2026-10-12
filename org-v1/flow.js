@@ -42,12 +42,26 @@ async function sendImage(psid, url) {
   const token = process.env.FB_PAGE_TOKEN; if (!token || !psid || !url) return;
   await fetch(`${GRAPH}?access_token=${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url, is_reusable: false } } } }) }).catch(() => { });
 }
-const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Жилийн төлөвлөгөө", "ORG_PLAN"], ["Тайлан", "ORG_REPORT"]];
-const PLAN_BTN = [["1. Байгууллагын төл", "FLOW_P_plan"], ["2. Багц: тайлан+төл", "FLOW_P_bundle"], ["3. Хэлтсийн төлөвл", "FLOW_P_plan_dept"], ["Цуцлах", "FLOW_CANCEL"]];
-const REPORT_BTN = [["1. Хэлтсийн тайлан", "FLOW_P_report_dept"], ["2. Хэлтэс: тайл+төл", "FLOW_P_bundle_dept"], ["3. Захирлын тайлан", "FLOW_P_report_dir"], ["4. Захирал: тайл+төл", "FLOW_P_bundle"], ["Цуцлах", "FLOW_CANCEL"]];
-const SWIPE = "👉 Доорх товчнуудыг хуруугаараа хажуу тийш гүйлгэвэл бүх сонголт харагдана. Эсвэл сонголтынхоо дугаарыг (1, 2, 3…) бичээд илгээж болно.";
+const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]];
+// Тайлан, төлөвлөгөөний цэс 2 алхамтай: эхлээд хэлтэс/байгууллага, дараа нь тайлан/төлөвлөгөө/багц
+const GROUP_BTN = [["1. Хэлтэс", "FLOW_G_dept"], ["2. Байгууллага", "FLOW_G_org"], ["Цуцлах", "FLOW_CANCEL"]];
+const DEPT_BTN = [["1. Тайлан", "FLOW_P_report_dept"], ["2. Төлөвлөгөө", "FLOW_P_plan_dept"], ["3. Багц", "FLOW_P_bundle_dept"], ["Цуцлах", "FLOW_CANCEL"]];
+const ORG_BTN = [["1. Тайлан", "FLOW_P_report_dir"], ["2. Төлөвлөгөө", "FLOW_P_plan"], ["3. Багц", "FLOW_P_bundle"], ["Цуцлах", "FLOW_CANCEL"]];
+const PICK = { group: ["G:dept", "G:org"], dept: ["report_dept", "plan_dept", "bundle_dept"], org: ["report_dir", "plan", "bundle"] };
+const BTN = { group: GROUP_BTN, dept: DEPT_BTN, org: ORG_BTN };
+const NUMHINT = "Товч дарах эсвэл дугаарыг нь (1, 2, 3) бичээд илгээж болно.";
 const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, text, MENU); return "selecting_type"; };
 
+const from = (p) => fmtMoney(priceFor(p, 5).price);
+async function showMenu(psid, menu) {
+  const T = {
+    group: `📑 Тайлан, төлөвлөгөө — таны материалаас тоо зохиохгүйгээр бэлтгэнэ (Word, PDF, Excel).\n\nХэнд зориулсан бэ?\n\n1️⃣ Хэлтэс, албан тушаал — нэг хэлтсийн жилийн ажлын тайлан, ирэх оны ажлын төлөвлөгөө (${from("report_dept")}-өөс).\n\n2️⃣ Байгууллага бүхэлдээ — гүйцэтгэх захирлын ТУЗ-д тавих тайлан, байгууллагын ирэх жилийн төлөвлөгөө, төсөв (${from("report_dir")}-өөс).\n\nТовч дарах эсвэл дугаарыг нь (1 эсвэл 2) бичээд илгээж болно.`,
+    dept: `🗂 Хэлтэс, албан тушаал:\n\n1️⃣ Ажлын тайлан — жилийн ажил, KPI, бэрхшээл, ирэх жилийн санал (10–20 хуудас). Удирдлагад тавина.\n${tiers("report_dept")}\n\n2️⃣ Ирэх оны ажлын төлөвлөгөө — зорилт, KPI, ажлууд, хуваарь, нөөц; Excel KPI хяналттай.\n${tiers("plan_dept")}\n\n3️⃣ Багц: тайлан + төлөвлөгөө (хямдралтай)\n${tiers("bundle_dept")}\n\n${NUMHINT}`,
+    org: `🏢 Байгууллага бүхэлдээ:\n\n1️⃣ Гүйцэтгэх захирлын (ТУЗ-д) тайлан — санхүүгийн үр дүн, ТУЗ-ийн шийдвэрийн биелэлт, бүх хэлтсийн нэгтгэл, төсөл, эрсдэл, ТУЗ-өөр шийдүүлэх асуудал (20–35 хуудас).\n${tiers("report_dir")}\n\n2️⃣ Ирэх жилийн үйл ажиллагааны төлөвлөгөө, төсөв — 60–80 хуудас Word, PDF, томьёотой Excel төсөв.\n${tiers("plan")}\n\n3️⃣ Багц: захирлын тайлан + төлөвлөгөө (хямдралтай)\n${tiers("bundle")}\n\n${NUMHINT}`,
+  };
+  if (!T[menu]) menu = "group";
+  await setF(psid, { s: "choose", menu }); await send(psid, T[menu], BTN[menu]); return "ext";
+}
 const NAMES = { marketing: "Маркетингийн төлөвлөгөө", report_dept: PRODUCTS.report_dept.name, report_dir: PRODUCTS.report_dir.name, plan: PRODUCTS.plan.name, bundle: PRODUCTS.bundle.name, plan_dept: PRODUCTS.plan_dept.name, bundle_dept: PRODUCTS.bundle_dept.name };
 const tiers = (p) => { const q = [5, 30, 80].map((u) => priceFor(p, u)); return `20 хүртэл хуудас: ${fmtMoney(q[0].price)} · 21–50: ${fmtMoney(q[1].price)} · 51–100: ${fmtMoney(q[2].price)}`; };
 const payInfo = () => process.env.PAY_INFO ? String(process.env.PAY_INFO).replace(/\\n/g, "\n") : null;
@@ -84,7 +98,7 @@ async function startOrg(psid, f, product) {
   await M.setMeta(psid, { product }).catch(() => { });
   const url = `${process.env.PUBLIC_URL || "https://menejer-ai-plan-service.onrender.com"}/u/org/${tokenFor(psid, product)}`;
   Object.assign(f, { s: "uploading", product, url, price: null });
-  const extra = product === "bundle_dept" ? `\nТусад нь авахаас ~17% хямд. Нэг материалаар эхлээд ажлын тайлан, дараа нь ирэх оны ажлын төлөвлөгөө гарна.` : product === "bundle" ? `\nТусад нь авахаас 15% хямд. Нэг материалаар эхлээд захирлын тайлан, дараа нь ирэх жилийн төлөвлөгөө гарна.` : "";
+  const extra = product === "bundle_dept" ? `\nТусад нь авахаас ${fmtMoney(priceFor("bundle_dept", 5).saving)}-өөс дээш хямд. Нэг материалаар эхлээд ажлын тайлан, дараа нь ирэх оны ажлын төлөвлөгөө гарна.` : product === "bundle" ? `\nТусад нь авахаас ${fmtMoney(priceFor("bundle", 5).saving)}-өөс дээш хямд. Нэг материалаар эхлээд захирлын тайлан, дараа нь ирэх жилийн төлөвлөгөө гарна.` : "";
   const what = product === "plan_dept" ? "Өнгөрсөн оны ажлын төлөвлөгөө, тайлан, гүйцэтгэлийн хүснэгт (KPI), хэлтсийн чиг үүрэг, удирдлагаас өгсөн чиглэл зэрэг материалаа илгээнэ үү." : product === "plan" ? "Өмнөх жилийн төлөвлөгөө, тайлан, орлого зарлагын задаргаа, орон тоо, цалингийн мэдээлэл зэрэг байгаа материалаа илгээнэ үү (бүгд заавал биш)." : "Тайлангийн хугацаанд хийсэн ажлаа харуулах материалаа (төлөвлөгөө, сарын тайлан, Excel хүснэгт, KPI, хурлын тэмдэглэл, санхүүгийн тайлан г.м.) илгээнэ үү.";
   await send(psid, `📋 ${NAMES[product]}\n\nҮнэ нь таны илгээх материалын хэмжээгээр бодогдоно:\n${tiers(product)}${extra}\n\n${what} Материалын агуулгыг төлбөр баталгаажсаны дараа л уншина.\n\n👉 Материал илгээх холбоос:\n${url}\n\nБүх файлаа илгээгээд хуудасны доод талын «Дууслаа» товчийг дарвал үнийн санал энд ирнэ.`, [["Цуцлах", "FLOW_CANCEL"]]);
 }
@@ -131,17 +145,15 @@ async function handle({ psid, text, payload, attachments }) {
 
   // Үндсэн цэсний сонголтууд (аль ч төлөвөөс, боловсруулж байгаагаас бусад)
   if (payload === "BIZ_PROJECT") { if (f.s === "processing") return "ext"; await setF(psid, { s: "left" }); await send(psid, "Бизнес төсөл сонголоо. Үргэлжлүүлэхийн тулд доорх товчийг дахин дарна уу.", [["Бизнес төсөл", "BIZ_PROJECT"]]); return "selecting_type"; }
-  if (["MKT_PLAN", "ORG_PLAN", "ORG_REPORT"].includes(payload) && f.s !== "processing" && f.s !== "payment_review") {
+  if ((["MKT_PLAN", "ORG_PLAN", "ORG_REPORT"].includes(payload) || payload === "FLOW_G_dept" || payload === "FLOW_G_org") && f.s !== "processing" && f.s !== "payment_review") {
     if (payload === "MKT_PLAN") {
       f = { s: "mkt_interview", product: "marketing", conv: [] };
       const hello = `📣 Маркетингийн төлөвлөгөө — ${fmtMoney(MKT_PRICE)}\n\n40–75 хуудас, алхам алхмаар хэрэгжүүлэх хөтөч: зах зээл, өрсөлдөгчийн шинжилгээ, маркетингийн стратеги, зарын бэлэн текст, 30 хоногийн контент календарь, сар бүрийн төсөв, үр дүнгийн тооцоо (PDF, Word, Excel).\n\nЭхлээд хэдэн асуулт асууя. Юуг сурталчлах вэ — бүтээгдэхүүн/үйлчилгээ, байгууллага эсвэл өөрийгөө (хувийн брэнд)? Нэр, юу санал болгодгоо товч бичнэ үү.`;
       f.conv.push({ role: "Менежер AI", text: hello });
       await setF(psid, f); await send(psid, hello, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
-    if (payload === "ORG_PLAN") { f = { s: "choose", menu: "plan" }; await setF(psid, f);
-      await send(psid, `📊 Жилийн төлөвлөгөөний үйлчилгээ:\n\n1️⃣ Байгууллагын ирэх жилийн үйл ажиллагааны төлөвлөгөө, төсөв — 60–80 хуудас Word, PDF, томьёотой Excel төсөв.\n${tiers("plan")}\n\n2️⃣ Багц: гүйцэтгэх захирлын өнгөрсөн жилийн тайлан + байгууллагын төлөвлөгөө (хямдралтай):\n${tiers("bundle")}\n\n3️⃣ Хэлтсийн ирэх оны ажлын төлөвлөгөө — зорилт, KPI, ажлууд, хуваарь, нөөц; Excel KPI хяналттай.\n${tiers("plan_dept")}\n\n${SWIPE}`, PLAN_BTN); return "ext"; }
-    if (payload === "ORG_REPORT") { f = { s: "choose", menu: "report" }; await setF(psid, f);
-      await send(psid, `📑 Тайлангийн үйлчилгээ — таны материалаас тоо зохиохгүйгээр бэлтгэнэ (Word, PDF, Excel):\n\n1️⃣ Хэлтэс, албан тушаалын ажлын тайлан — нэг хэлтэс, албан тушаалын жилийн ажил, KPI, бэрхшээл, ирэх жилийн санал (10–20 хуудас). Удирдлагад тавина.\n${tiers("report_dept")}\n\n2️⃣ Хэлтэс: тайлан + ирэх оны ажлын төлөвлөгөө (багц, хямдралтай):\n${tiers("bundle_dept")}\n\n3️⃣ Гүйцэтгэх захирлын (ТУЗ-д) тайлан — байгууллага бүхэлдээ: санхүүгийн үр дүн, ТУЗ-ийн шийдвэрийн биелэлт, бүх хэлтсийн нэгтгэл, төсөл, эрсдэл, ТУЗ-өөр шийдүүлэх асуудал (20–35 хуудас).\n${tiers("report_dir")}\n\n4️⃣ Захирал: тайлан + байгууллагын ирэх жилийн төлөвлөгөө (багц, хямдралтай):\n${tiers("bundle")}\n\nАль нь вэ?\n\n${SWIPE}`, REPORT_BTN); return "ext"; }
+    if (payload === "ORG_PLAN" || payload === "ORG_REPORT") return showMenu(psid, "group");
+    if (payload.startsWith("FLOW_G_")) return showMenu(psid, payload.slice(7));
   }
   if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { await setF(psid, { s: "left" }); return toMenu(psid, "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
   if (payload.startsWith("FLOW_P_") && PRODUCTS[payload.slice(7)]) { await startOrg(psid, f, payload.slice(7)); await setF(psid, f); return "ext"; }
@@ -178,10 +190,12 @@ async function handle({ psid, text, payload, attachments }) {
       await send(psid, "Таны захиалгыг боловсруулж байна ⏳ Бэлэн болмогц файлаар илгээнэ. Материалын хэмжээнээс хамаарч 30–90 минут болно."); return "ext";
     }
     case "choose": {
-      const n = (text.match(/^\s*([1-4])\s*[.)]?\s*$/) || [])[1];
-      const pick = n && (f.menu === "plan" ? ["plan", "bundle", "plan_dept"] : ["report_dept", "bundle_dept", "report_dir", "bundle"])[Number(n) - 1];
+      const n = (text.match(/^\s*([1-3])\s*[.)]?\s*$/) || [])[1];
+      const pick = n && PICK[f.menu] && PICK[f.menu][Number(n) - 1];
+      if (pick && pick.startsWith("G:")) return showMenu(psid, pick.slice(2));
       if (pick) { await startOrg(psid, f, pick); await setF(psid, f); return "ext"; }
-      await send(psid, "Сонголтынхоо дугаарыг (1, 2, 3…) бичих эсвэл доорх товчноос сонгоно уу. Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.", f.menu === "plan" ? PLAN_BTN : REPORT_BTN); return "ext"; }
+      if (!PICK[f.menu]) return showMenu(psid, "group");
+      await send(psid, `Доорх товчноос сонгох эсвэл дугаарыг нь (1, 2, 3) бичээд илгээнэ үү.`, BTN[f.menu]); return "ext"; }
     default:
       await setF(psid, { s: "left" }); return toMenu(psid);
   }
