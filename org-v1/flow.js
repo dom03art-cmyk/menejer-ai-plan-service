@@ -436,7 +436,8 @@ router.post("/qpay/invoice", express.json(), auth, async (req, res) => {
     setTimeout(async () => {
       try {
         if (inv.qrUrl) await sendImage(String(psid), inv.qrUrl);
-        await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, энд мэдэгдэнэ.`);
+        await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, энд мэдэгдэнэ.`,
+          kind === "bizrev" ? [["Цуцлах", "BIZ_CANCEL"]] : [["Цуцлах", "BIZ_CANCEL"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]]);
       } catch (e) { console.warn("[qpay] biz QR илгээх:", e.message); }
     }, Number(process.env.QPAY_BIZ_DELAY_MS || 4000));
   } catch (e) { console.warn("[qpay] biz нэхэмжлэх:", e.message); res.json({ ok: false, error: String(e.message).slice(0, 200) }); }
