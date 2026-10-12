@@ -42,11 +42,45 @@ function pump() {
   }
 }
 
+// Засварын хүсэлтийг түр хүлээлгэх (PLAN_HOLD_REVISIONS=1). Унтраасны дараа сервис асахад хүлээлгэсэн хүсэлтүүд автоматаар ажиллана.
+const store = require("./store");
+const REV_MARK = "Засварын хүсэлт";
+const holding = () => process.env.PLAN_HOLD_REVISIONS === "1";
+const HOLD_MSG = "Таны засварын хүсэлтийг хүлээн авлаа ✅ Систем шинэчлэгдэж байгаа тул засвар хэдэн цагийн дотор хийгдэж, PDF болон Word файлаар энд ирнэ. Засварын эрх тань хасагдаагүй, хүсэлтээ дахин бичих шаардлагагүй. Хүлээсэнд баярлалаа 🙏";
+function enqueueHeld(h) {
+  const id = crypto.randomUUID();
+  const job = { id, psid: h.psid, conversation: h.conversation, status: "queued", createdAt: Date.now() };
+  jobs.set(id, job); activeByPsid.set(h.psid, id); queue.push(job);
+  fbText(h.psid, "Таны засварыг боловсруулж эхэллээ ⏳ Ойролцоогоор 30–45 минутын дараа PDF болон Word файлаар илгээнэ.").catch(() => { });
+  pump(); return id;
+}
+async function releaseHeld(log = console.log) {
+  if (holding()) return [];
+  const list = await store.holdList(), started = [];
+  for (const h of list) {
+    if (!h || !h.psid || !h.conversation) continue;
+    await store.holdDel(h.psid);
+    if (activeByPsid.has(h.psid)) { log(`[hold] ${h.psid} аль хэдийн ажиллаж байна — давхар эхлүүлэхгүй`); continue; }
+    started.push(enqueueHeld(h)); log(`[hold] ${h.psid} хүлээлгэсэн засварыг эхлүүлэв`);
+  }
+  return started;
+}
+if (process.env.PLAN_MOCK !== "1") setTimeout(() => releaseHeld().catch((e) => console.warn("[hold]", e.message)), 25000).unref();
+
 // body: { psid, conversation } эсвэл { psid, assumptions } ; notify:true бол эхлэх мессеж илгээнэ
 router.post("/jobs/plan", express.json({ limit: "2mb" }), auth, async (req, res) => {
   const { psid, conversation, assumptions, notify = true } = req.body || {};
   if (!conversation && !assumptions) return res.status(400).json({ error: "conversation эсвэл assumptions шаардлагатай" });
   if (psid && activeByPsid.has(psid)) return res.status(202).json({ job_id: activeByPsid.get(psid), status: "already_running" });
+  // Систем шинэчлэгдэж байх үед засварын хүсэлтийг хүлээлгэнэ: шинэчлэл дуусаад автоматаар ажиллана
+  if (psid && conversation && holding() && String(conversation).includes(REV_MARK)) {
+    await store.holdSave(psid, conversation);
+    console.log(`[hold] ${psid} засварын хүсэлтийг хүлээлгэв`);
+    res.status(202).json({ status: "held" });
+    if (notify) fbText(psid, HOLD_MSG).catch(() => { });
+    if (process.env.ADMIN_PSID) fbText(process.env.ADMIN_PSID, `⏸ Засварын хүсэлт хүлээлгэгдэв (psid ${psid}). Систем шинэчлэгдсэний дараа автоматаар ажиллана.`).catch(() => { });
+    return;
+  }
   const id = crypto.randomUUID();
   const job = { id, psid, conversation, assumptions, status: "queued", createdAt: Date.now() };
   jobs.set(id, job); if (psid) activeByPsid.set(psid, id); queue.push(job);
@@ -110,7 +144,7 @@ router.post("/jobs/xlsx", express.json({ limit: "2mb" }), auth, async (req, res)
     const { psid, assumptions, send, to } = req.body || {};
     const { makeModel } = require("./xlsxModel"); const { analyse } = require("./model"); const { normalize } = require("./intake"); const { loadPlan } = require("./store");
     let A = assumptions ? normalize(assumptions) : null;
-    if (!A && psid) { const st = await loadPlan(psid); A = st && st.A; if (A && A.contingency_rate === undefined) A.contingency_rate = 0; } // хуучин төсөлд нөөц төсөв нэмэхгүй — хүргэсэн Word-той тоо таарна
+    if (!A && psid) { const st = await loadPlan(psid); A = st && st.A; if (A && A.contingency_rate === undefined) A.contingency_rate = 0; if (A && A.tax_regime === undefined) A.tax_regime = "legacy"; } // хуучин төсөлд нөөц төсөв нэмэхгүй — хүргэсэн Word-той тоо таарна
     if (!A) return res.status(404).json({ ok: false, error: "Энэ захиалагчийн хадгалсан төсөл олдсонгүй" });
     const m = await makeModel(A, analyse(A));
     if (!m.ok) { console.warn("[xlsx] шалгалт унав", JSON.stringify(m.bad.slice(0, 5))); return res.status(422).json({ ok: false, error: "Excel-ийн тооцоо системийн тооцоотой таарсангүй — файл илгээгээгүй", bad: m.bad.slice(0, 10) }); }
@@ -128,3 +162,5 @@ router.post("/jobs/xlsx", express.json({ limit: "2mb" }), auth, async (req, res)
 router.use(require("./files"));
 router.use(require("./upload"));
 module.exports = router;
+module.exports.releaseHeld = releaseHeld;
+module.exports._q = { jobs, activeByPsid, queue };

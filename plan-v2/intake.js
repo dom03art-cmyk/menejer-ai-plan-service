@@ -14,11 +14,11 @@ const DEFAULT_CONTINGENCY = Math.min(0.3, Math.max(0, Number(process.env.PLAN_CO
 const SCHEMA = `{
  "company": {"name","reg_no","address","contact_name","phone","founded","core_business","industry"},
  "project": {"title","location","funder","funder_type":"bank|investor","description"},
- "start_year": 2026, "start_month_index": 0-11 (эхлэх сар, 0=1-р сар),
+ "start_year": 2026, "start_month_index": 0-11 (БОРЛУУЛАЛТ эхлэх сар, 0=1-р сар — барилга, угсралт, тоног төхөөрөмж суурилуулалт, туршилтын үйлдвэрлэл дууссаны дараах сар),
  "loan": {"amount","months","rate_monthly","grace_months"},
  "cash_equity": өөрийн мөнгөн хөрөнгө,
  "season": [эхлэх сараас эхлэн 12 тоо, сарын борлуулалтын харьцангуй жин, дундаж=1],
- "products": [{"key","name","price" (НӨАТ-тэй үнэ),"materials": {"орц": нэгжийн үнэ ₮},"labor": нэгжийн хөдөлмөр ₮,"delivery": нэгжийн хүргэлт ₮,"volumes":[5 жилийн жилийн тоо]}],
+ "products": [{"key","name","unit" (борлуулах нэгж: кг, ширхэг, литр, тн, хайрцаг, үйлчилгээ г.м. — volumes ба price энэ нэгжээр),"price" (НӨАТ-тэй үнэ),"materials": {"орц": нэгжийн үнэ ₮},"labor": нэгжийн хөдөлмөр ₮,"delivery": нэгжийн хүргэлт ₮,"volumes":[5 жилийн жилийн тоо]}],
  "capex": [{"name","qty","unit_price","life" (жил)}],
  "inkind": [{"name","value","life","depreciable"}] (одоо эзэмшиж буй хөрөнгө; мал, газар зэрэг элэгдэлгүй хөрөнгөд "depreciable": false),
  "init_inventory": түүхий эдийн анхны нөөц ₮,
@@ -44,7 +44,8 @@ const SYSTEM = `Чи Монголын банкны стандартын бизн
 7. Захиалагч "ажилтан авахгүй", "өөрөө ажиллана" гэвэл staff = [] (хоосон). Эзэмшигчийн өөрийн хөдөлмөрийг цалингийн зардал болгож БҮҮ тооц — энэ нь ашгаас олгогдоно.
 8. Мал сүрэг, газар бол элэгддэггүй (биологийн/байнгын) хөрөнгө — inkind-д "depreciable": false. Малын төллөлт, сүргийн өсөлтийг жил бүрийн борлуулалтын тоонд тусга.
 9. Захиалагч санхүүгийн ҮР ДҮНГ урьдчилж тогтоохыг хүссэн бол (ашиг, ашгийн хувь, NPV, IRR, DSCR-ийг тодорхой хэмжээнд хүргэх) түүнийг target_requests-д бичээд, үүний төлөө ЯМАР Ч тоог (үнэ, тоо хэмжээ, зардал, цалин) өөрчилж, өсгөж, бууруулж БОЛОХГҮЙ. Тоо зөвхөн захиалагчийн хэлсэн бодит мэдээлэл ба зах зээлийн бодит түвшинд тулгуурлана.
-10. Зөвхөн JSON буцаа. Бүтэц:\n${SCHEMA}`;
+10. Хүчин чадал, гарцыг хугацааны нэгжтэй нь (сард, жилд, нэг үйлдвэрлэлийн циклд) зөв хөрвүүлж volumes-д ЖИЛИЙН тоогоор бич. Барилга, засвар, суурилуулалт хийх бол борлуулалтыг тэр ажил дууссаны дараах сараас эхлүүл (start_month_index); эхний жилийн борлуулалтыг хүчин чадлын аажмаар нэмэгдэлтээр тооцож, үйл ажиллагаа зогсдог (жишээ нь өвлийн) саруудад season-ийн жинг бага тавь.
+11. Зөвхөн JSON буцаа. Бүтэц:\n${SCHEMA}`;
 
 async function extract(conversationText) {
   const A = await callJSON({ system: SYSTEM, user: `Захиалагчтай хийсэн яриа:\n\n${conversationText}`, model: WRITER, maxTokens: 16000 });
@@ -55,7 +56,7 @@ function normalize(A) {
   const out = { ...DEFAULTS, ...A, loan: { ...DEFAULTS.loan, ...(A.loan || {}) } };
   if (!Array.isArray(out.season) || out.season.length !== 12) out.season = DEFAULTS.season;
   out.products = (out.products || []).filter(p => p && p.price > 0).map((p, i) => ({
-    key: p.key || `p${i + 1}`, name: p.name || `Бүтээгдэхүүн ${i + 1}`, price: Number(p.price),
+    key: p.key || `p${i + 1}`, name: p.name || `Бүтээгдэхүүн ${i + 1}`, unit: String(p.unit || "").trim().slice(0, 20) || "нэгж", price: Number(p.price),
     materials: p.materials || {}, labor: Number(p.labor || 0), delivery: Number(p.delivery || 0),
     volumes: (p.volumes || []).concat(Array(5).fill((p.volumes || [0]).slice(-1)[0])).slice(0, 5).map(Number),
   }));
@@ -71,6 +72,7 @@ function normalize(A) {
   if (!isFinite(out.contingency_rate)) out.contingency_rate = DEFAULT_CONTINGENCY;
   out.exclude = Array.isArray(out.exclude) ? out.exclude.filter(x => typeof x === "string") : [];
   out.target_requests = Array.isArray(out.target_requests) ? out.target_requests.filter(x => typeof x === "string" && x.trim()).slice(0, 5) : [];
+  out.tax_regime = out.tax_regime === "legacy" ? "legacy" : "auto";
   out.start_year = out.start_year || 2026;
   out.start_month_index = out.start_month_index ?? new Date().getMonth() + 1;
   return out;

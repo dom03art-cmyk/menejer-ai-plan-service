@@ -10,6 +10,19 @@ function productUnit(p) {
   return { mat, labor, cogs: mat + labor, delivery: Number(p.delivery || 0), net };
 }
 
+// ААНОАТ (Монгол, 2026): жилийн борлуулалтын орлого 300 сая ₮ хүртэл — орлогын 1% (хялбаршуулсан горим);
+// 300 сая – 1.5 тэрбум — ашгийн 10%, 90% буцаан олголттой тул бодитоор ашгийн cit_eff (1%);
+// 1.5 тэрбумаас дээш — ашгийн 10% (6 тэрбум хүртэл), 25% (түүнээс дээш).
+// tax_regime "legacy" — өмнө хүргэсэн төсөл (ашгийн cit_eff), засварт тоо өөрчлөгдөхгүй.
+const CIT_SMALL = 300e6, CIT_REFUND = 1.5e9;
+function citRegime(A, rev) { return A.tax_regime === "legacy" ? "legacy" : rev <= CIT_SMALL ? "small" : rev <= CIT_REFUND ? "refund" : "standard"; }
+function citTax(A, rev, pbt) {
+  const r = citRegime(A, rev), p = Math.max(0, pbt);
+  if (r === "small") return Math.max(0, rev) * 0.01;
+  if (r === "standard") return Math.min(p, 6e9) * 0.10 + Math.max(0, p - 6e9) * 0.25;
+  return p * A.cit_eff;
+}
+
 function loanSchedule(L, r, n, grace) {
   const s = []; let bal = L;
   if (!L || !n) return s;
@@ -67,7 +80,7 @@ function run(A, o = {}) {
     Y.dep = dep; Y.ebit = Y.ebitda - dep;
     const ms = sched.slice(y * 12, y * 12 + 12);
     Y.int = ms.reduce((a, s) => a + s.int, 0); Y.prin = ms.reduce((a, s) => a + s.prin, 0); Y.ds = Y.int + Y.prin;
-    Y.pbt = Y.ebit - Y.int; Y.tax = Math.max(0, Y.pbt) * A.cit_eff; Y.ni = Y.pbt - Y.tax;
+    Y.pbt = Y.ebit - Y.int; Y.tax = citTax(A, Y.rev, Y.pbt); Y.ni = Y.pbt - Y.tax;
     Y.capex_extra = (A.extra_capex || []).filter(e => e.year === y + 1).reduce((a, e) => a + e.amount, 0);
     Y.inv_end = Y.mat / 12 * 1.5;
     years.push(Y);
@@ -144,4 +157,4 @@ function analyse(A) {
   return { A, R, ...base, scen, sens, grace6, bep, cum, balanceOk: R.bs.every(b => Math.abs(b.diff) < 1) };
 }
 
-module.exports = { run, analyse, productUnit, npv, irr, payback, loanSchedule, MONTHS_MN };
+module.exports = { citTax, citRegime, CIT_SMALL, CIT_REFUND,  run, analyse, productUnit, npv, irr, payback, loanSchedule, MONTHS_MN };

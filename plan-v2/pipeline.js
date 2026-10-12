@@ -60,6 +60,8 @@ async function runRevision(job, prev, step, log) {
   const conv = job.conversation;
   // Нөөц төсөв нэмэгдэхээс өмнө хүргэсэн төсөл: засварын үед тоо өөрчлөгдөхгүй байхаар 0 хэвээр үлдээнэ
   if (prev.A && prev.A.contingency_rate === undefined) prev.A.contingency_rate = 0;
+  // Татварын шинэ горимоос өмнө хүргэсэн төсөл: тоо өөрчлөгдөхгүй байхаар хуучин горимоор үлдээнэ (санхүүгийн таамаглал өөрчлөгдвөл шинэ горимд шилжинэ)
+  if (prev.A && prev.A.tax_regime === undefined) prev.A.tax_regime = "legacy";
   const last = conv.lastIndexOf(REV_MARK);
   const request = conv.slice(last).slice(0, 4000);
   // Өмнөх төслөөс хойш нэмэгдсэн мэдээлэл (шинэ файл, зураг г.м.)
@@ -74,7 +76,7 @@ async function runRevision(job, prev, step, log) {
   let A = prev.A, rv = { A, an: analyse(A), changes: prev.rv?.changes || [], viable: prev.rv?.viable, reason: prev.rv?.reason };
   if (plan.patch && typeof plan.patch === "object" && Object.keys(plan.patch).length) {
     step("2/5 санхүүгийн загварыг шинэчилж байна");
-    const A1 = normalize({ ...A, ...plan.patch, loan: { ...A.loan, ...(plan.patch.loan || {}) } });
+    const A1 = normalize({ ...A, ...plan.patch, tax_regime: "auto", loan: { ...A.loan, ...(plan.patch.loan || {}) } });
     rv = await review(A1, analyse(A1), prev.res || { macro: [], market: [] }, conv, (m) => log(`[${job.id}] ${m}`));
     A = rv.A;
     ids = [...new Set([...ids, ...FIN_DEPENDENT])];

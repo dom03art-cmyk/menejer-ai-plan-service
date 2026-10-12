@@ -73,7 +73,7 @@ function buildXlsx(A, an, opt = {}) {
     ["loan", "Зээлийн дүн (₮)", A.loan.amount || 0, NUM], ["months", "Зээлийн хугацаа (сар)", A.loan.months || 0, "0"],
     ["rate", "Зээлийн хүү (сарын)", A.loan.rate_monthly || 0, "0.00%"], ["grace", "Үндсэн төлбөрөөс чөлөөлөгдөх хугацаа (сар)", A.loan.grace_months || 0, "0"],
     ["cash_eq", "Өөрийн хөрөнгө — мөнгөөр (₮)", A.cash_equity || 0, NUM], ["init_inv", "Түүхий эдийн анхны нөөц (₮)", A.init_inventory || 0, NUM],
-    ["cit", "Орлогын албан татварын бодит хувь", A.cit_eff, PCT], ["disc", "Хөнгөлөлтийн хувь (NPV)", A.disc, PCT],
+    ["cit", A.tax_regime === "legacy" ? "Орлогын албан татварын бодит хувь" : "ААНОАТ бодит хувь (орлого 300 сая–1.5 тэрбум, ашгаас)", A.cit_eff, PCT], ["disc", "Хөнгөлөлтийн хувь (NPV)", A.disc, PCT],
     ["pg", "Борлуулах үнийн жилийн өсөлт", A.price_growth, PCT], ["vg", "Хувьсах зардлын жилийн өсөлт", A.varcost_growth, PCT],
     ["fg", "Тогтмол зардлын жилийн өсөлт", A.fixed_growth, PCT], ["payfee", "Төлбөрийн шимтгэл (орлогоос)", A.pay_fee, PCT],
     ["mkt", "Маркетингийн зардал (орлогоос)", A.mkt_rate, PCT], ["ersi", "Ажил олгогчийн НДШ", A.er_si ?? 0.135, PCT], ["vat", "НӨАТ", 0.10, PCT],
@@ -257,7 +257,8 @@ function buildXlsx(A, an, opt = {}) {
   line("ebit", "Үйл ажиллагааны ашиг (EBIT)", (c) => `${col(c)}${IS.ebitda}-${col(c)}${IS.dep}`, (Y) => Y.ebit, { total: true, bold: true });
   line("int", "Зээлийн хүүгийн зардал", (c, y) => LINT(y + 1), (Y) => Y.int);
   line("pbt", "Татварын өмнөх ашиг", (c) => `${col(c)}${IS.ebit}-${col(c)}${IS.int}`, (Y) => Y.pbt, { total: true, bold: true });
-  line("tax", "Орлогын албан татвар", (c) => `MAX(0,${col(c)}${IS.pbt})*${P.cit}`, (Y) => Y.tax);
+  line("tax", "Орлогын албан татвар", (c) => { const pb = `MAX(0,${col(c)}${IS.pbt})`, rv = `${col(c)}${IS.rev}`;
+    return A.tax_regime === "legacy" ? `${pb}*${P.cit}` : `IF(${rv}<=300000000,MAX(0,${rv})*0.01,IF(${rv}<=1500000000,${pb}*${P.cit},MIN(${pb},6000000000)*0.1+MAX(0,${pb}-6000000000)*0.25))`; }, (Y) => Y.tax);
   line("ni", "ЦЭВЭР АШИГ", (c) => `${col(c)}${IS.pbt}-${col(c)}${IS.tax}`, (Y) => Y.ni, { total: true, bold: true });
   r++; section(ws, r, "Харьцаа", 6); r++;
   line("gm", "Нийт ашгийн маржин", (c) => `IF(${col(c)}${IS.rev}=0,0,${col(c)}${IS.gross}/${col(c)}${IS.rev})`, null, { fmt: PCT });
@@ -352,7 +353,7 @@ function buildXlsx(A, an, opt = {}) {
   label(wm, 33, "Нэгжийн цэвэр үнэ (НӨАТ-гүй)"); f(wm, 33, 2, `${ref(S_IN, p1, 2)}/(1+IF(${ref(S_IN, p1, 3)}=1,${P.vat},0))`);
   label(wm, 34, "Нэгжийн хувь нэмрийн ашиг"); f(wm, 34, 2, `B33-${ref(S_IN, p1, 4)}-${ref(S_IN, p1, 5)}-${ref(S_IN, p1, 6)}-B33*(${P.payfee}+${P.mkt})`); chk(S_KPI, "B34", cm1, "хувь нэмрийн ашиг");
   label(wm, 35, "Тогтмол зардал + элэгдэл + хүү (1-р жил)"); f(wm, 35, 2, `${isc("fixed", 0)}+${isc("dep", 0)}+${isc("int", 0)}`); chk(S_KPI, "B35", fx1, "BEP тогтмол");
-  label(wm, 36, "Алдагдалгүй цэг (ширхэг/нэгж)", { bold: true }); f(wm, 36, 2, `IF(B34>0,B35/B34,"хүрэхгүй")`, NUM, { bold: true }); if (cm1 > 0) chk(S_KPI, "B36", fx1 / cm1, "BEP нэгж");
+  label(wm, 36, `Алдагдалгүй цэг (${(A.products[0] && A.products[0].unit) || "нэгж"})`, { bold: true }); f(wm, 36, 2, `IF(B34>0,B35/B34,"хүрэхгүй")`, NUM, { bold: true }); if (cm1 > 0) chk(S_KPI, "B36", fx1 / cm1, "BEP нэгж");
   label(wm, 37, "Алдагдалгүй цэг (орлого, ₮)", { bold: true }); f(wm, 37, 2, `IF(B34>0,B36*B33,"хүрэхгүй")`, NUM, { bold: true });
 
   // ───────────────────────── 7. САРЫН МӨНГӨН УРСГАЛ (36 сар) ─────────────────────────

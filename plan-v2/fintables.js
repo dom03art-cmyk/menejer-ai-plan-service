@@ -5,6 +5,13 @@ const { decisionPoints } = require("./extras");
 const yrH = ["1-р жил", "2-р жил", "3-р жил", "4-р жил", "5-р жил"];
 const T = (caption, headers, rows, left) => ({ type: "table", caption, headers, rows, left });
 
+// Хугарлын цэгтэй харьцуулсан дүгнэлт: орлого цэгээс дээш эсвэл доош (хасах хувь гаргахгүй)
+function bepVerdict(rev, bep) {
+  if (!(bep.cm > 0) || !isFinite(bep.revenue)) return "Нэгжийн хувь нэмрийн ашиг эерэг биш тул борлуулалтаар хугарлын цэгт хүрэхгүй — үнэ, өртгийг эргэн харах шаардлагатай.";
+  const d = rev / bep.revenue - 1;
+  return d >= 0 ? `1-р жилийн төлөвлөсөн орлого хугарлын цэгээс ${pc(d)}-иар өндөр.` : `1-р жилийн төлөвлөсөн орлого хугарлын цэгээс ${pc(-d)}-иар бага буюу хугарлын цэгт хүрэхгүй байна.`;
+}
+
 function build(an) {
   const { A, R } = an, Y = R.years, BS = R.bs, CF = R.cfs, SC = R.sched;
   const cont = R.contingency || 0, contPct = pc(R.contRate || 0, 0);
@@ -17,8 +24,13 @@ function build(an) {
   const row = (label, fn) => [label, ...Y.map(y => m1(fn(y)))];
   const loanY = (y) => SC.slice(y * 12, y * 12 + 12);
   const pay = payroll(A.staff, A.er_si);
-  const P = A.products.map(p => ({ ...p, u: productUnit(p) }));
-  const orders1 = Object.values(Y[0].units).reduce((a, b) => a + b, 0);
+  const P = A.products.map(p => ({ ...p, unit: p.unit || "нэгж", u: productUnit(p) }));
+  // Өөр нэгжтэй бүтээгдэхүүний тоог нэмж нийлүүлэхгүй (кг + ширхэг утгагүй)
+  const sameUnit = P.every(p => p.unit === P[0].unit);
+  const orders1 = sameUnit ? Object.values(Y[0].units).reduce((a, b) => a + b, 0) : null;
+  const { citRegime } = require("./model");
+  const reg1 = citRegime(A, Y[0].rev);
+  const taxText = reg1 === "legacy" ? `ашгийн ${pc(A.cit_eff, 0)}` : reg1 === "small" ? "борлуулалтын орлогын 1% (жилийн орлого 300 сая ₮ хүртэл)" : reg1 === "refund" ? `ашгийн 10%, 90% буцаан олголттой (бодит ${pc(A.cit_eff, 0)})` : "ашгийн 10% (6 тэрбум ₮ хүртэл), 25% (түүнээс дээш)";
   const X = {};
 
   X.summaryTable = [T("Төслийн ерөнхий мэдээлэл", ["Үзүүлэлт", "Утга"], [
@@ -51,17 +63,17 @@ function build(an) {
   X.unitTable = [T("Нэгж бүтээгдэхүүний эдийн засаг (1-р жил, ₮)", ["Бүтээгдэхүүн", "Үнэ (НӨАТ-тэй)", "Цэвэр үнэ", "Өртөг", "Хүргэлт", "Нэгжийн ашиг", "Маржин"],
     P.map(p => [p.name, f(p.price), f(p.u.net), f(p.u.cogs), f(p.u.delivery), f(p.u.net - p.u.cogs - p.u.delivery), pc((p.u.net - p.u.cogs - p.u.delivery) / p.u.net)])),
     { type: "note", text: "Нэгжийн ашиг = Цэвэр үнэ − Өртөг − Хүргэлт. Маркетинг, төлбөрийн шимтгэл, тогтмол зардлыг 4-р бүлэгт тооцов." }];
-  X.salesMonthly = [T("1-р жилийн сарын борлуулалтын таамаглал", ["Сар", ...P.map(p => p.name.split(" (")[0].slice(0, 18)), "Орлого (₮)"],
+  X.salesMonthly = [T("1-р жилийн сарын борлуулалтын таамаглал", ["Сар", ...P.map(p => `${p.name.split(" (")[0].slice(0, 18)} (${p.unit})`), "Орлого (₮)"],
     [...R.months.slice(0, 12).map(m => [m.label, ...P.map(p => m.units[p.key] < 20 ? m.units[p.key].toFixed(1) : f(m.units[p.key])), f(m.rev)]),
       ["!Нийт", ...P.map(p => f(Y[0].units[p.key])), f(Y[0].rev)]])];
-  X.salesYearly = [T("5 жилийн борлуулалт", ["Үзүүлэлт", ...yrH], [...P.map(p => [`${p.name} (тоо)`, ...Y.map(y => f(y.units[p.key]))]), ...P.map(p => [`${p.name} (сая ₮)`, ...Y.map(y => m1(y.rev_p[p.key]))]), row("!Нийт орлого (сая ₮)", y => y.rev)])];
+  X.salesYearly = [T("5 жилийн борлуулалт", ["Үзүүлэлт", ...yrH], [...P.map(p => [`${p.name} (${p.unit})`, ...Y.map(y => f(y.units[p.key]))]), ...P.map(p => [`${p.name} (сая ₮)`, ...Y.map(y => m1(y.rev_p[p.key]))]), row("!Нийт орлого (сая ₮)", y => y.rev)])];
   const S = an.scen, SK = ["Реалистик", "Консерватив", "Пессимистик"];
   X.scenarioTable = [T("Гурван хувилбарын харьцуулалт", ["Үзүүлэлт", "Реалистик", "Консерватив (−15%)", "Пессимистик (−30%)"], [
     ["1-р жилийн орлого (сая ₮)", ...SK.map(k => m1(S[k].rev[0]))], ["3-р жилийн орлого (сая ₮)", ...SK.map(k => m1(S[k].rev[2]))],
     ["1-р жилийн цэвэр ашиг (сая ₮)", ...SK.map(k => m1(S[k].ni[0]))], ["DSCR 1/2/3", ...SK.map(k => S[k].dscr.map(d => d ? d.toFixed(2) : "—").join(" / "))],
     ["NPV (сая ₮)", ...SK.map(k => m1(S[k].npv))], ["IRR", ...SK.map(k => pc(S[k].irr))]])];
   X.scenarioMonthly = [T("Гурван хувилбарын сарын орлого, мянган ₮ (36 сар)", ["Сар", ...SK], R.months.map((m, i) => [m.label, ...SK.map(k => f(S[k].mrev[i] / 1000))]))];
-  X.bepText = [{ type: "box", title: "Ашигт ажиллагааны хугарлын цэг (1-р жил)", text: `Тогтмол зардал (элэгдэл, хүүг оролцуулан) ${m1(an.bep.fixed)} сая ₮ ÷ үндсэн бүтээгдэхүүний нэгжийн хувь нэмрийн ашиг ${f(an.bep.cm)} ₮ = ${f(an.bep.units)} ширхэг (${m1(an.bep.revenue)} сая ₮). Төлөвлөсөн орлого хугарлын цэгээс ${pc(1 - an.bep.revenue / Y[0].rev)}-иар өндөр.` }];
+  X.bepText = [{ type: "box", title: "Ашигт ажиллагааны хугарлын цэг (1-р жил)", text: !(an.bep.cm > 0) ? `Тогтмол зардал (элэгдэл, хүүг оролцуулан) ${m1(an.bep.fixed)} сая ₮. ${bepVerdict(Y[0].rev, an.bep)}` : `Тогтмол зардал (элэгдэл, хүүг оролцуулан) ${m1(an.bep.fixed)} сая ₮ ÷ үндсэн бүтээгдэхүүний нэгжийн хувь нэмрийн ашиг ${f(an.bep.cm)} ₮ = ${f(an.bep.units)} ${P[0].unit} ${P[0].name}${P.length > 1 ? "-тэй тэнцэх борлуулалт" : ""} (${m1(an.bep.revenue)} сая ₮). ${bepVerdict(Y[0].rev, an.bep)}` }];
   X.payrollTable = [T("Цалингийн тооцоо (сарын, ₮)", ["Албан тушаал", "Тоо", "Үндсэн цалин", "Ажилтны НДШ", "ХХОАТ", "Гарт олгох", "Ажил олгогчийн НДШ", "Нийт зардал"],
     [...pay.rows.map(r => [`${r.title}${r.from_year > 1 ? ` (${r.from_year}-р жилээс)` : ""}`, r.count, f(r.gross), f(r.eeSi), f(r.it), f(r.net), f(r.erSi), f(r.total)]), ["!Нийт", "", f(pay.gross), "", "", "", "", f(pay.total)]]),
     { type: "note", text: `Ажил олгогчийн НДШ ${pc(A.er_si)}, ажилтны 11.5%, ХХОАТ 10%. Цалин жил бүр ${pc(A.fixed_growth, 0)}-иар өснө.` }];
@@ -76,7 +88,7 @@ function build(an) {
     ["Маркетинг / төлбөрийн шимтгэл", `${pc(A.mkt_rate, 0)} / ${pc(A.pay_fee, 0)} орлогоос`, "Тооцоо"],
     ["Зээл", `${f(A.loan.amount)} ₮, ${A.loan.months} сар, сарын ${(A.loan.rate_monthly * 100).toFixed(2)}%`, (A.assumed_fields || []).includes("loan.rate_monthly") ? "Хүү — таамаглал" : "Захиалагч"],
     ...(cont > 0 ? [["Нөөц төсөв (гэнэтийн зардал)", `Шинэ үндсэн хөрөнгийн ${contPct} = ${f(cont)} ₮`, "Тооцоо (өөрийн хөрөнгөөс)"]] : []),
-    ["Хөнгөлөлтийн хувь / ААНОАТ", `${pc(A.disc, 0)} / ${pc(A.cit_eff, 0)}`, "Тооцоо / хууль"]], [1, 2]),
+    ["Хөнгөлөлтийн хувь (NPV)", pc(A.disc, 0), "Тооцоо"], ["ААНОАТ (1-р жил)", taxText, "Хууль (нягтлан бодогчоор баталгаажуулна)"]], [1, 2]),
     ...((A.assumed_fields || []).length ? [{ type: "note", text: `Захиалагчаар баталгаажуулах таамаглал: ${A.assumed_fields.join("; ")}.` }] : [])];
   X.metricsTable = [T("Хөрөнгө оруулалтын үр ашиг", ["Үзүүлэлт", "Утга"], [["NPV (20%)", `${f(an.npv)} ₮`], ["IRR", pc(an.irr)], ["Нөхөгдөх хугацаа", an.pb ? `${an.pb.toFixed(2)} жил` : "5+ жил"],
     ...R.dscr.slice(0, 3).map((d, i) => [`DSCR ${i + 1}-р жил`, d ? d.toFixed(2) : "—"]), ["6 сарын хөнгөлөлттэй үеийн DSCR (1-р жил)", an.grace6 ? an.grace6.toFixed(2) : "—"],
@@ -130,7 +142,12 @@ function build(an) {
     scenarios: Object.fromEntries(SK.map(k => [k, { rev_y1: Math.round(S[k].rev[0]), dscr: S[k].dscr.map(d => d ? +d.toFixed(2) : null), npv: Math.round(S[k].npv) }])),
     sensitivity: an.sens.map(s => ({ case: s.name, change: s.change, dscr_y1: s.dscr1 ? +s.dscr1.toFixed(2) : null, npv: Math.round(s.npv) })),
     products: P.map(p => ({ key: p.key, name: p.name, price: p.price, net_price: Math.round(p.u.net), unit_cost: p.u.cogs, delivery: p.u.delivery, margin_pct: +((p.u.net - p.u.cogs - p.u.delivery) / p.u.net * 100).toFixed(1) })),
-    staff: A.staff, capex: A.capex, orders_y1: Math.round(orders1), min_monthly_cash: Math.round(Math.min(...R.mc.map(x => x.cash))),
+    staff: A.staff, capex: A.capex,
+    sales_volume_y1: P.map(p => ({ product: p.name, unit: p.unit, quantity: Math.round(Y[0].units[p.key]) })), sales_volume_y1_total: orders1 === null ? "бүтээгдэхүүний нэгж өөр тул нийлбэр тооцохгүй" : `${f(orders1)} ${P[0].unit}`,
+    sales_start: R.months[0] ? R.months[0].label : null,
+    min_monthly_cash: Math.round(Math.min(...R.mc.map(x => x.cash))), min_monthly_cash_month: (() => { const i = R.mc.reduce((b, x, k, a) => (x.cash < a[b].cash ? k : b), 0); return R.months[i] ? `${R.months[i].label} (${i + 1}-р сар, 36 сарын хугацаанд хамгийн бага)` : null; })(),
+    cash_end_by_year: (BS || []).slice(1).map((b, i) => ({ year: i + 1, cash: Math.round(b.cash ?? 0) })),
+    bep_vs_revenue_y1: bepVerdict(Y[0].rev, an.bep), tax_regime_y1: taxText,
     jobs_created: (A.staff || []).reduce((s, x) => s + (Number(x.count) || 0), 0),
     taxes_by_year: Y.map((y, i) => ({ year: i + 1, income_tax: Math.round(y.tax || 0), social_insurance_employer: Math.round((A.staff || []).filter(s => (s.from_year || 1) <= i + 1).reduce((s, x) => s + x.count * x.gross * 12, 0) * (A.shi_rate || 0.125)) })),
     assumed_fields: A.assumed_fields || [], missing_info: A.missing_info || [],

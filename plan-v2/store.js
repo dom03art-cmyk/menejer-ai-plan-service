@@ -32,4 +32,25 @@ async function loadPlan(psid) {
     return JSON.parse(zlib.gunzipSync(Buffer.from(v, "base64")).toString("utf8"));
   } catch (e) { console.warn("[store] уншиж чадсангүй:", e.message); return null; }
 }
-module.exports = { savePlan, loadPlan };
+// Систем шинэчлэгдэж байх үед ирсэн засварын хүсэлтийг түр хадгална (PLAN_HOLD_REVISIONS=1).
+// Redis байхгүй бол процессын санах ойд (дахин асахад алдагдана — Make-ийн restart дахин илгээлт нөөц болно).
+const holdMem = new Map();
+async function holdSave(psid, conversation) {
+  const v = JSON.stringify({ psid, conversation, at: new Date().toISOString() });
+  try { const c = await getClient(); if (c) { await c.set(`planhold:${psid}`, v, { EX: 7 * 86400 }); return; } } catch (e) { console.warn("[store] hold хадгалж чадсангүй:", e.message); }
+  holdMem.set(psid, v);
+}
+async function holdList() {
+  const out = [];
+  try {
+    const c = await getClient();
+    if (c) { for await (const k of c.scanIterator({ MATCH: "planhold:*", COUNT: 100 })) { for (const key of Array.isArray(k) ? k : [k]) { const v = await c.get(key); if (v) out.push(JSON.parse(v)); } } }
+  } catch (e) { console.warn("[store] hold уншиж чадсангүй:", e.message); }
+  for (const v of holdMem.values()) out.push(JSON.parse(v));
+  return out;
+}
+async function holdDel(psid) {
+  holdMem.delete(psid);
+  try { const c = await getClient(); if (c) await c.del(`planhold:${psid}`); } catch (e) { console.warn("[store] hold устгаж чадсангүй:", e.message); }
+}
+module.exports = { savePlan, loadPlan, holdSave, holdList, holdDel };
