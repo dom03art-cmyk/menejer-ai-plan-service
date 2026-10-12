@@ -401,11 +401,28 @@ QP.onPaid("flow", async (rec) => {
   }
   await approve(rec.psid, f, "qpay");
 });
-// Бизнес төсөл (Make урсгал): төлбөр орсныг админд «Батлах» товчтой мэдэгдэнэ (Make-ийн APPROVE| урсгал хэвээр)
+// Бизнес төсөл (Make урсгал): төлбөр орвол Make-ийн «QPay төлбөр орсон» сценари (MAKE_PAID_WEBHOOK)-оор
+// захиалагчийн төлвийг шилжүүлж (админы «Батлах»-тай адил), мессежийг сервер илгээнэ. Амжилтгүй бол админд «Батлах» товч.
+const BIZ_OK = (url) => `✅ Таны QPay төлбөр баталгаажлаа. Баярлалаа!\n\nОдоо бизнесийнхээ тухай аль болох дэлгэрэнгүй бичнэ үү: бизнесийн чиглэл, байршил, борлуулах үнэ, зээлийн дүн болон зориулалт. Хэд хэдэн мессежээр бичсэн ч болно.\n\n📎 ФАЙЛ ИЛГЭЭХ ЗААВАР: Үнийн санал, хүснэгт, өмнөх төсөл, зураг (Word, Excel, PDF, зураг) байвал төсөлд тусгана.\n• Файлаа чирж оруулах боломжгүй. Текст бичих хэсгийн зүүн талд байрлах «+» товчийг (утсанд 🖼 эсвэл «+») дарж файлаа сонгоно уу. Нэг дор олон зураг сонгож болно.\n• Хэрэв илгээж чадахгүй бол энэ холбоосоор илгээнэ үү:\n${url}`;
+const BIZREV_OK = "✅ Нэмэлт засварын QPay төлбөр баталгаажлаа. Баярлалаа!\n\nЯмар засвар хийлгэхийг хүсч байгаагаа нэг мессежинд дэлгэрэнгүй бичнэ үү. Шинэ файл байвал эхлээд «+» товчоор илгээгээд, дараа нь засварын хүсэлтээ бичнэ үү. Засвар нь анхны төслийн сэдвийн хүрээнд хийгдэнэ (30–45 минут).";
+async function markMakePaid(rec) {
+  const url = process.env.MAKE_PAID_WEBHOOK, k = process.env.MAKE_PAID_KEY;
+  if (!url || !k) throw new Error("MAKE_PAID_WEBHOOK тохируулаагүй");
+  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ psid: rec.psid, kind: rec.kind, amount: rec.paid || rec.amount, no: rec.no, k }), signal: AbortSignal.timeout(20000) });
+  if (!r.ok) throw new Error(`Make webhook HTTP ${r.status}`);
+}
 const bizPaid = async (rec) => {
-  await send(rec.psid, "QPay төлбөр амжилттай орлоо ✅ Хэдхэн минутын дотор үргэлжлүүлнэ.");
   const rev = rec.kind === "bizrev";
-  if (ADMIN()) await send(ADMIN(), `💳 QPay төлбөр орлоо (банкаар баталгаажсан): ${fmtMoney(rec.paid || rec.amount)}\n${rev ? "Бизнес төслийн нэмэлт засвар" : "Бизнес төсөл"}\nЗахиалагч: ${rec.psid}\n\nДоорх товчийг дарж үргэлжлүүлнэ үү.`, [["✅ Батлах", `${rev ? "APPROVEREV|" : "APPROVE|"}${rec.psid}`]]);
+  try {
+    await markMakePaid(rec);
+    if (rev) await send(rec.psid, BIZREV_OK);
+    else { const { tokenFor } = require("../plan-v2/upload"); await send(rec.psid, BIZ_OK(`${process.env.PUBLIC_URL || "https://menejer-ai-plan-service.onrender.com"}/u/${tokenFor(rec.psid)}`)); }
+    if (ADMIN()) await send(ADMIN(), `💳 QPay төлбөр орлоо ${fmtMoney(rec.paid || rec.amount)} — автоматаар баталгаажлаа: ${rev ? "бизнес төслийн нэмэлт засвар" : "бизнес төсөл (ярилцлага эхэллээ)"} (${rec.psid})`);
+  } catch (e) {
+    console.warn("[qpay] biz автомат баталгаажуулалт:", e.message);
+    await send(rec.psid, "QPay төлбөр амжилттай орлоо ✅ Хэдхэн минутын дотор үргэлжлүүлнэ.");
+    if (ADMIN()) await send(ADMIN(), `💳 QPay төлбөр орлоо (банкаар баталгаажсан): ${fmtMoney(rec.paid || rec.amount)}\n${rev ? "Бизнес төслийн нэмэлт засвар" : "Бизнес төсөл"}\nЗахиалагч: ${rec.psid}\n⚠️ Автомат шилжүүлэлт амжилтгүй (${String(e.message).slice(0, 80)}).\n\nДоорх товчийг дарж үргэлжлүүлнэ үү.`, [["✅ Батлах", `${rev ? "APPROVEREV|" : "APPROVE|"}${rec.psid}`]]);
+  }
 };
 QP.onPaid("biz", bizPaid); QP.onPaid("bizrev", bizPaid);
 // Make дуудна: POST /qpay/invoice {psid, amount, kind: "biz"|"bizrev"} → захиалагчид QR ба холбоос илгээнэ
