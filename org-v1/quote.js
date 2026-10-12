@@ -6,7 +6,7 @@ const PRODUCTS = {
   report_dir: { name: "Гүйцэтгэх захирлын тайлан", tiers: [149900, 199900, 249900], extra: 50000 },
   plan: { name: "Байгууллагын жилийн төлөвлөгөө, төсөв", tiers: [199900, 249900, 299900], extra: 50000 },
   plan_dept: { name: "Хэлтсийн ирэх оны ажлын төлөвлөгөө", tiers: [69900, 89900, 119900], extra: 20000 },
-  bundle_dept: { name: "Хэлтсийн тайлан + ирэх оны төлөвлөгөө (багц)", parts: ["report_dept", "plan_dept"], discount: 0.17 },
+  bundle_dept: { name: "Хэлтсийн тайлан + ирэх оны төлөвлөгөө (багц)", parts: ["report_dept", "plan_dept"], discount: 0.17, fixed: { "21–50": 129900 } },
   // Багц: нэг материалаар хоёуланг нь хийнэ; үнэ = хэсгүүдийн үнийн нийлбэрээс 15% хөнгөлөөд ...9 900₮ болгож дээш дугуйлна
   bundle: { name: "Гүйцэтгэх захирлын тайлан + жилийн төлөвлөгөө (багц)", parts: ["report_dir", "plan"], discount: 0.15 },
 };
@@ -89,7 +89,7 @@ function priceFor(product, units) {
   const u = Math.ceil(Number(units) || 0);
   if (p.parts) {
     const qs = p.parts.map((x) => priceFor(x, u)), full = qs.reduce((a, q) => a + q.price, 0);
-    const price = Math.ceil(full * (1 - p.discount) / 10000) * 10000 - 100;
+    const price = (p.fixed && p.fixed[qs[0].tier]) || Math.ceil(full * (1 - p.discount) / 10000) * 10000 - 100;
     return { product, name: p.name, units: u, tier: qs[0].tier, price, full, saving: full - price, parts: qs };
   }
   let price, tier;
