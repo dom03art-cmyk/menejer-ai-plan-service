@@ -43,6 +43,9 @@ async function sendImage(psid, url) {
   await fetch(`${GRAPH}?access_token=${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url, is_reusable: false } } } }) }).catch(() => { });
 }
 const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Жилийн төлөвлөгөө", "ORG_PLAN"], ["Тайлан", "ORG_REPORT"]];
+const PLAN_BTN = [["1. Байгууллагын төл", "FLOW_P_plan"], ["2. Багц: тайлан+төл", "FLOW_P_bundle"], ["3. Хэлтсийн төлөвл", "FLOW_P_plan_dept"], ["Цуцлах", "FLOW_CANCEL"]];
+const REPORT_BTN = [["1. Хэлтсийн тайлан", "FLOW_P_report_dept"], ["2. Хэлтэс: тайл+төл", "FLOW_P_bundle_dept"], ["3. Захирлын тайлан", "FLOW_P_report_dir"], ["4. Захирал: тайл+төл", "FLOW_P_bundle"], ["Цуцлах", "FLOW_CANCEL"]];
+const SWIPE = "👉 Доорх товчнуудыг хуруугаараа хажуу тийш гүйлгэвэл бүх сонголт харагдана. Эсвэл сонголтынхоо дугаарыг (1, 2, 3…) бичээд илгээж болно.";
 const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, text, MENU); return "selecting_type"; };
 
 const NAMES = { marketing: "Маркетингийн төлөвлөгөө", report_dept: PRODUCTS.report_dept.name, report_dir: PRODUCTS.report_dir.name, plan: PRODUCTS.plan.name, bundle: PRODUCTS.bundle.name, plan_dept: PRODUCTS.plan_dept.name, bundle_dept: PRODUCTS.bundle_dept.name };
@@ -136,9 +139,9 @@ async function handle({ psid, text, payload, attachments }) {
       await setF(psid, f); await send(psid, hello, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
     if (payload === "ORG_PLAN") { f = { s: "choose", menu: "plan" }; await setF(psid, f);
-      await send(psid, `📊 Байгууллагын ирэх жилийн үйл ажиллагааны төлөвлөгөө, төсөв: 60–80 хуудас Word, PDF, томьёотой Excel төсөв.\n\nҮнэ (материалын хэмжээгээр): ${tiers("plan")}\n\nӨнгөрсөн жилийн гүйцэтгэх захирлын тайлантай багцаар авбал 15% хямд (${tiers("bundle")}).\n\n🗂 Хэлтсийн ирэх оны ажлын төлөвлөгөө (зорилт, KPI, ажлууд, хуваарь, нөөц; Excel KPI хяналттай): ${tiers("plan_dept")}`, [["Байгууллагын төлөвл", "FLOW_P_plan"], ["Багц: тайлан+төлөвл", "FLOW_P_bundle"], ["Хэлтсийн төлөвлөгөө", "FLOW_P_plan_dept"], ["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
+      await send(psid, `📊 Жилийн төлөвлөгөөний үйлчилгээ:\n\n1️⃣ Байгууллагын ирэх жилийн үйл ажиллагааны төлөвлөгөө, төсөв — 60–80 хуудас Word, PDF, томьёотой Excel төсөв.\n${tiers("plan")}\n\n2️⃣ Багц: гүйцэтгэх захирлын өнгөрсөн жилийн тайлан + байгууллагын төлөвлөгөө (хямдралтай):\n${tiers("bundle")}\n\n3️⃣ Хэлтсийн ирэх оны ажлын төлөвлөгөө — зорилт, KPI, ажлууд, хуваарь, нөөц; Excel KPI хяналттай.\n${tiers("plan_dept")}\n\n${SWIPE}`, PLAN_BTN); return "ext"; }
     if (payload === "ORG_REPORT") { f = { s: "choose", menu: "report" }; await setF(psid, f);
-      await send(psid, `📑 Тайлангийн үйлчилгээ — таны материалаас тоо зохиохгүйгээр бэлтгэнэ (Word, PDF, Excel):\n\n• Хэлтэс, албан тушаалын ажлын тайлан — нэг хэлтэс, албан тушаалын жилийн ажил, KPI, бэрхшээл, ирэх жилийн санал (10–20 хуудас). Удирдлагад тавина.\n${tiers("report_dept")}\n\n• Хэлтэс: тайлан + ирэх оны ажлын төлөвлөгөө (багц, ~17% хямд):\n${tiers("bundle_dept")}\n\n• Гүйцэтгэх захирлын (ТУЗ-д) тайлан — байгууллага бүхэлдээ: санхүүгийн үр дүн, ТУЗ-ийн шийдвэрийн биелэлт, бүх хэлтсийн нэгтгэл, төсөл, эрсдэл, ТУЗ-өөр шийдүүлэх асуудал (20–35 хуудас).\n${tiers("report_dir")}\n\n• Захирал: тайлан + байгууллагын ирэх жилийн төлөвлөгөө (багц, 15% хямд):\n${tiers("bundle")}\n\nАль нь вэ?`, [["Хэлтсийн тайлан", "FLOW_P_report_dept"], ["Хэлтэс: тайлан+төлөв", "FLOW_P_bundle_dept"], ["Захирлын тайлан", "FLOW_P_report_dir"], ["Захирал тайлан+төлөв", "FLOW_P_bundle"], ["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
+      await send(psid, `📑 Тайлангийн үйлчилгээ — таны материалаас тоо зохиохгүйгээр бэлтгэнэ (Word, PDF, Excel):\n\n1️⃣ Хэлтэс, албан тушаалын ажлын тайлан — нэг хэлтэс, албан тушаалын жилийн ажил, KPI, бэрхшээл, ирэх жилийн санал (10–20 хуудас). Удирдлагад тавина.\n${tiers("report_dept")}\n\n2️⃣ Хэлтэс: тайлан + ирэх оны ажлын төлөвлөгөө (багц, хямдралтай):\n${tiers("bundle_dept")}\n\n3️⃣ Гүйцэтгэх захирлын (ТУЗ-д) тайлан — байгууллага бүхэлдээ: санхүүгийн үр дүн, ТУЗ-ийн шийдвэрийн биелэлт, бүх хэлтсийн нэгтгэл, төсөл, эрсдэл, ТУЗ-өөр шийдүүлэх асуудал (20–35 хуудас).\n${tiers("report_dir")}\n\n4️⃣ Захирал: тайлан + байгууллагын ирэх жилийн төлөвлөгөө (багц, хямдралтай):\n${tiers("bundle")}\n\nАль нь вэ?\n\n${SWIPE}`, REPORT_BTN); return "ext"; }
   }
   if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { await setF(psid, { s: "left" }); return toMenu(psid, "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
   if (payload.startsWith("FLOW_P_") && PRODUCTS[payload.slice(7)]) { await startOrg(psid, f, payload.slice(7)); await setF(psid, f); return "ext"; }
@@ -174,8 +177,11 @@ async function handle({ psid, text, payload, attachments }) {
       if (st === "done" || st === "gone" || st === "failed" || st === "blocked") { await setF(psid, { s: "left" }); return toMenu(psid, st === "done" || st === "gone" ? "Таны захиалга бэлэн болж, файлууд дээр илгээгдсэн байгаа 📄 Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу." : "Танай захиалгын талаар манай ажилтан тантай холбогдоно. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
       await send(psid, "Таны захиалгыг боловсруулж байна ⏳ Бэлэн болмогц файлаар илгээнэ. Материалын хэмжээнээс хамаарч 30–90 минут болно."); return "ext";
     }
-    case "choose":
-      await send(psid, "Доорх товчноос сонгоно уу.", f.menu === "plan" ? [["Байгууллагын төлөвл", "FLOW_P_plan"], ["Багц: тайлан+төлөвл", "FLOW_P_bundle"], ["Хэлтсийн төлөвлөгөө", "FLOW_P_plan_dept"], ["Цуцлах", "FLOW_CANCEL"]] : [["Хэлтсийн тайлан", "FLOW_P_report_dept"], ["Хэлтэс: тайлан+төлөв", "FLOW_P_bundle_dept"], ["Захирлын тайлан", "FLOW_P_report_dir"], ["Захирал тайлан+төлөв", "FLOW_P_bundle"], ["Цуцлах", "FLOW_CANCEL"]]); return "ext";
+    case "choose": {
+      const n = (text.match(/^\s*([1-4])\s*[.)]?\s*$/) || [])[1];
+      const pick = n && (f.menu === "plan" ? ["plan", "bundle", "plan_dept"] : ["report_dept", "bundle_dept", "report_dir", "bundle"])[Number(n) - 1];
+      if (pick) { await startOrg(psid, f, pick); await setF(psid, f); return "ext"; }
+      await send(psid, "Сонголтынхоо дугаарыг (1, 2, 3…) бичих эсвэл доорх товчноос сонгоно уу. Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.", f.menu === "plan" ? PLAN_BTN : REPORT_BTN); return "ext"; }
     default:
       await setF(psid, { s: "left" }); return toMenu(psid);
   }
