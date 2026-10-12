@@ -7,6 +7,7 @@ const express = require("express");
 const { callJSON, FAST, WRITER } = require("../plan-v2/claude");
 const { fbText } = require("../plan-v2/util");
 const { PRODUCTS, fmtMoney, priceFor } = require("./quote");
+const PER = require("./period");
 const router = express.Router();
 const GRAPH = "https://graph.facebook.com/v21.0/me/messages";
 const MKT_PRICE = Number(process.env.MKT_PRICE || 149900);
@@ -47,20 +48,57 @@ const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг",
 const GROUP_BTN = [["1. Хэлтэс", "FLOW_G_dept"], ["2. Байгууллага", "FLOW_G_org"], ["Цуцлах", "FLOW_CANCEL"]];
 const DEPT_BTN = [["1. Тайлан", "FLOW_P_report_dept"], ["2. Төлөвлөгөө", "FLOW_P_plan_dept"], ["3. Багц", "FLOW_P_bundle_dept"], ["Цуцлах", "FLOW_CANCEL"]];
 const ORG_BTN = [["1. Тайлан", "FLOW_P_report_dir"], ["2. Төлөвлөгөө", "FLOW_P_plan"], ["3. Багц", "FLOW_P_bundle"], ["Цуцлах", "FLOW_CANCEL"]];
-const PICK = { group: ["G:dept", "G:org"], dept: ["report_dept", "plan_dept", "bundle_dept"], org: ["report_dir", "plan", "bundle"] };
-const BTN = { group: GROUP_BTN, dept: DEPT_BTN, org: ORG_BTN };
+// Хугацааны сонголт: эхлээд төрөл (жил, хагас жил, улирал, сар), дараа нь аль нь
+const PER_BTN = [["1. Жил", "FLOW_T_year"], ["2. Хагас жил", "FLOW_T_half"], ["3. Улирал", "FLOW_T_quarter"], ["4. Сар", "FLOW_T_month"], ["Цуцлах", "FLOW_CANCEL"]];
+const SUB_BTN = {
+  half: [["1-р хагас (1–6 сар)", "FLOW_N_1"], ["2-р хагас (7–12 сар)", "FLOW_N_2"], ["Цуцлах", "FLOW_CANCEL"]],
+  quarter: [...PER.ROMAN.map((r, i) => [`${r} улирал`, `FLOW_N_${i + 1}`]), ["Цуцлах", "FLOW_CANCEL"]],
+  month: [...Array.from({ length: 12 }, (_, i) => [`${i + 1}-р сар`, `FLOW_N_${i + 1}`]), ["Цуцлах", "FLOW_CANCEL"]],
+};
+const PICK = { group: ["G:dept", "G:org"], dept: ["report_dept", "plan_dept", "bundle_dept"], org: ["report_dir", "plan", "bundle"],
+  per: ["T:year", "T:half", "T:quarter", "T:month"], per_half: ["N:1", "N:2"], per_quarter: ["N:1", "N:2", "N:3", "N:4"], per_month: Array.from({ length: 12 }, (_, i) => `N:${i + 1}`) };
+const BTN = { group: GROUP_BTN, dept: DEPT_BTN, org: ORG_BTN, per: PER_BTN, per_half: SUB_BTN.half, per_quarter: SUB_BTN.quarter, per_month: SUB_BTN.month };
 const NUMHINT = "Товч дарах эсвэл дугаарыг нь (1, 2, 3) бичээд илгээж болно.";
 const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, `${text}\n\n👉 Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.`, MENU); return "selecting_type"; };
 
 const from = (p) => fmtMoney(priceFor(p, 5).price);
 async function showMenu(psid, menu) {
   const T = {
-    group: `📑 Тайлан, төлөвлөгөө — таны материалаас тоо зохиохгүйгээр бэлтгэнэ (Word, PDF, Excel).\n\nХэнд зориулсан бэ?\n\n1️⃣ Хэлтэс, албан тушаал — нэг хэлтсийн жилийн ажлын тайлан, ирэх оны ажлын төлөвлөгөө (${from("report_dept")}-өөс).\n\n2️⃣ Байгууллага бүхэлдээ — гүйцэтгэх захирлын ТУЗ-д тавих тайлан, байгууллагын ирэх жилийн төлөвлөгөө, төсөв (${from("report_dir")}-өөс).\n\nТовч дарах эсвэл дугаарыг нь (1 эсвэл 2) бичээд илгээж болно.`,
-    dept: `🗂 Хэлтэс, албан тушаал:\n\n1️⃣ Ажлын тайлан — жилийн ажил, KPI, бэрхшээл, ирэх жилийн санал (10–20 хуудас). Удирдлагад тавина.\n${tiers("report_dept")}\n\n2️⃣ Ирэх оны ажлын төлөвлөгөө — зорилт, KPI, ажлууд, хуваарь, нөөц; Excel KPI хяналттай.\n${tiers("plan_dept")}\n\n3️⃣ Багц: тайлан + төлөвлөгөө (хямдралтай)\n${tiers("bundle_dept")}\n\n${NUMHINT}`,
-    org: `🏢 Байгууллага бүхэлдээ:\n\n1️⃣ Гүйцэтгэх захирлын (ТУЗ-д) тайлан — санхүүгийн үр дүн, ТУЗ-ийн шийдвэрийн биелэлт, бүх хэлтсийн нэгтгэл, төсөл, эрсдэл, ТУЗ-өөр шийдүүлэх асуудал (20–35 хуудас).\n${tiers("report_dir")}\n\n2️⃣ Ирэх жилийн үйл ажиллагааны төлөвлөгөө, төсөв — 60–80 хуудас Word, PDF, томьёотой Excel төсөв.\n${tiers("plan")}\n\n3️⃣ Багц: захирлын тайлан + төлөвлөгөө (хямдралтай)\n${tiers("bundle")}\n\n${NUMHINT}`,
+    group: `📑 Тайлан, төлөвлөгөө — таны материалаас тоо зохиохгүйгээр бэлтгэнэ (Word, PDF, Excel).\n\nХэнд зориулсан бэ?\n\n1️⃣ Хэлтэс, албан тушаал — нэг хэлтсийн ажлын тайлан, ажлын төлөвлөгөө (${from("report_dept")}-өөс).\n\n2️⃣ Байгууллага бүхэлдээ — гүйцэтгэх захирлын ТУЗ-д тавих тайлан, байгууллагын төлөвлөгөө, төсөв (${from("report_dir")}-өөс).\n\nХугацааг (жил, хагас жил, улирал, сар) дараа нь сонгоно.\n\nТовч дарах эсвэл дугаарыг нь (1 эсвэл 2) бичээд илгээж болно.`,
+    dept: `🗂 Хэлтэс, албан тушаал:\n\n1️⃣ Ажлын тайлан — хийсэн ажил, KPI, бэрхшээл, дараагийн хугацааны санал (10–20 хуудас). Удирдлагад тавина.\n${tiers("report_dept")}\n\n2️⃣ Ажлын төлөвлөгөө — зорилт, KPI, ажлууд, хуваарь, нөөц; Excel KPI хяналттай.\n${tiers("plan_dept")}\n\n3️⃣ Багц: тайлан + төлөвлөгөө (хямдралтай)\n${tiers("bundle_dept")}\n\n${NUMHINT}`,
+    org: `🏢 Байгууллага бүхэлдээ:\n\n1️⃣ Гүйцэтгэх захирлын (ТУЗ-д) тайлан — санхүүгийн үр дүн, ТУЗ-ийн шийдвэрийн биелэлт, бүх хэлтсийн нэгтгэл, төсөл, эрсдэл, ТУЗ-өөр шийдүүлэх асуудал (20–35 хуудас).\n${tiers("report_dir")}\n\n2️⃣ Үйл ажиллагааны төлөвлөгөө, төсөв — 60–80 хуудас Word, PDF, томьёотой Excel төсөв.\n${tiers("plan")}\n\n3️⃣ Багц: захирлын тайлан + төлөвлөгөө (хямдралтай)\n${tiers("bundle")}\n\n${NUMHINT}`,
   };
   if (!T[menu]) menu = "group";
   await setF(psid, { s: "choose", menu }); await send(psid, T[menu], BTN[menu]); return "ext";
+}
+const kindOf = (product) => (PRODUCTS[product] && PRODUCTS[product].parts ? "bundle" : /^plan/.test(product) ? "plan" : "report");
+async function askPeriod(psid, product) {
+  const k = kindOf(product);
+  const q = k === "plan" ? "📅 Төлөвлөгөө ямар хугацаанд зориулагдсан бэ?" : k === "bundle" ? "📅 Тайлангийн хугацааг сонгоно уу. Төлөвлөгөө нь дараагийн ижил хугацаанд гарна (жишээ нь III улирлын тайлан → IV улирлын төлөвлөгөө, жилийн тайлан → ирэх жилийн төлөвлөгөө)." : "📅 Тайлан ямар хугацааных вэ?";
+  await setF(psid, { s: "choose", menu: "per", product });
+  await send(psid, `${NAMES[product]}\n\n${q}\n\n1️⃣ Жил\n2️⃣ Хагас жил\n3️⃣ Улирал\n4️⃣ Сар\n\nТовч дарах эсвэл дугаарыг нь (1–4) бичээд илгээж болно.`, PER_BTN); return "ext";
+}
+async function pickType(psid, f, type) {
+  if (type === "year") { f.period = { type: "year" }; f.periodYear = undefined; await startOrg(psid, f, f.product); await setF(psid, f); return "ext"; }
+  if (!SUB_BTN[type]) return askPeriod(psid, f.product);
+  const q = { half: "Аль хагас жил вэ?", quarter: "Аль улирал вэ?", month: "Аль сар вэ?" }[type];
+  const hint = { half: "1 эсвэл 2", quarter: "1–4", month: "1–12" }[type];
+  await setF(psid, { s: "choose", menu: "per_" + type, product: f.product, ptype: type });
+  await send(psid, `📅 ${q}\n\nТовч дарах эсвэл дугаарыг нь (${hint}) бичээд илгээж болно.`, SUB_BTN[type]); return "ext";
+}
+async function pickN(psid, f, n) {
+  const p = { type: f.ptype, n };
+  if (!PER.valid(p)) return pickType(psid, f, f.ptype);
+  f.period = PER.clean(p); f.periodYear = kindOf(f.product) === "plan" ? PER.planYear(f.period) : undefined; await startOrg(psid, f, f.product); await setF(psid, f); return "ext";
+}
+// Messenger-т харуулах хугацаа
+function periodLine(product, period) {
+  const p = PER.clean(period); if (!p) return "";
+  const k = kindOf(product);
+  if (p.type === "year") return k === "plan" ? "📅 Хугацаа: жилийн төлөвлөгөө" : k === "bundle" ? "📅 Хугацаа: жилийн тайлан + ирэх жилийн төлөвлөгөө" : "📅 Хугацаа: жилийн тайлан";
+  if (k === "plan") return `📅 Хугацаа: ${PER.make(p, PER.planYear(p)).full}`; // pickN-д хадгалсан онтой ижил
+  const nx = PER.next(p, 2000);
+  return k === "bundle" ? `📅 Хугацаа: ${PER.names(p).gen} тайлан + ${PER.names(nx).gen} төлөвлөгөө (он нь материалаас тогтоогдоно)` : `📅 Хугацаа: ${PER.names(p).label} (он нь материалаас тогтоогдоно)`;
 }
 const NAMES = { marketing: "Маркетингийн төлөвлөгөө", report_dept: PRODUCTS.report_dept.name, report_dir: PRODUCTS.report_dir.name, plan: PRODUCTS.plan.name, bundle: PRODUCTS.bundle.name, plan_dept: PRODUCTS.plan_dept.name, bundle_dept: PRODUCTS.bundle_dept.name };
 const tiers = (p) => { const q = [5, 30, 80].map((u) => priceFor(p, u)); return `20 хүртэл хуудас: ${fmtMoney(q[0].price)} · 21–50: ${fmtMoney(q[1].price)} · 51–100: ${fmtMoney(q[2].price)}`; };
@@ -95,12 +133,13 @@ async function startOrg(psid, f, product) {
   const { tokenFor } = require("./upload");
   const M = require("./materials");
   await M.clear(psid).catch(() => { });
-  await M.setMeta(psid, { product }).catch(() => { });
+  await M.setMeta(psid, { product, period: PER.clean(f.period) || null }).catch(() => { });
   const url = `${process.env.PUBLIC_URL || "https://menejer-ai-plan-service.onrender.com"}/u/org/${tokenFor(psid, product)}`;
   Object.assign(f, { s: "uploading", product, url, price: null });
-  const extra = product === "bundle_dept" ? `\nТусад нь авахаас ${fmtMoney(priceFor("bundle_dept", 5).saving)}-өөс дээш хямд. Нэг материалаар эхлээд ажлын тайлан, дараа нь ирэх оны ажлын төлөвлөгөө гарна.` : product === "bundle" ? `\nТусад нь авахаас ${fmtMoney(priceFor("bundle", 5).saving)}-өөс дээш хямд. Нэг материалаар эхлээд захирлын тайлан, дараа нь ирэх жилийн төлөвлөгөө гарна.` : "";
-  const what = product === "plan_dept" ? "Өнгөрсөн оны ажлын төлөвлөгөө, тайлан, гүйцэтгэлийн хүснэгт (KPI), хэлтсийн чиг үүрэг, удирдлагаас өгсөн чиглэл зэрэг материалаа илгээнэ үү." : product === "plan" ? "Өмнөх жилийн төлөвлөгөө, тайлан, орлого зарлагын задаргаа, орон тоо, цалингийн мэдээлэл зэрэг байгаа материалаа илгээнэ үү (бүгд заавал биш)." : "Тайлангийн хугацаанд хийсэн ажлаа харуулах материалаа (төлөвлөгөө, сарын тайлан, Excel хүснэгт, KPI, хурлын тэмдэглэл, санхүүгийн тайлан г.м.) илгээнэ үү.";
-  await send(psid, `📋 ${NAMES[product]}\n\nҮнэ нь таны илгээх материалын хэмжээгээр бодогдоно:\n${tiers(product)}${extra}\n\n${what} Материалын агуулгыг төлбөр баталгаажсаны дараа л уншина.\n\n👉 Материал илгээх холбоос:\n${url}\n\nБүх файлаа илгээгээд хуудасны доод талын «Дууслаа» товчийг дарвал үнийн санал энд ирнэ.`, [["Цуцлах", "FLOW_CANCEL"]]);
+  const extra = product === "bundle_dept" ? `\nТусад нь авахаас ${fmtMoney(priceFor("bundle_dept", 5).saving)}-өөс дээш хямд. Нэг материалаар эхлээд ажлын тайлан, дараа нь дараагийн хугацааны ажлын төлөвлөгөө гарна.` : product === "bundle" ? `\nТусад нь авахаас ${fmtMoney(priceFor("bundle", 5).saving)}-өөс дээш хямд. Нэг материалаар эхлээд захирлын тайлан, дараа нь дараагийн хугацааны төлөвлөгөө гарна.` : "";
+  const what = product === "plan_dept" ? "Өмнөх хугацааны ажлын төлөвлөгөө, тайлан, гүйцэтгэлийн хүснэгт (KPI), хэлтсийн чиг үүрэг, удирдлагаас өгсөн чиглэл зэрэг материалаа илгээнэ үү." : product === "plan" ? "Өмнөх үеийн төлөвлөгөө, тайлан, орлого зарлагын задаргаа, орон тоо, цалингийн мэдээлэл зэрэг байгаа материалаа илгээнэ үү (бүгд заавал биш)." : "Тайлангийн хугацаанд хийсэн ажлаа харуулах материалаа (төлөвлөгөө, сарын тайлан, Excel хүснэгт, KPI, хурлын тэмдэглэл, санхүүгийн тайлан г.м.) илгээнэ үү.";
+  const pl = periodLine(product, f.period);
+  await send(psid, `📋 ${NAMES[product]}${pl ? "\n" + pl : ""}\n\nҮнэ нь таны илгээх материалын хэмжээгээр бодогдоно:\n${tiers(product)}${extra}\n\n${what} Материалын агуулгыг төлбөр баталгаажсаны дараа л уншина.\n\n👉 Материал илгээх холбоос:\n${url}\n\nБүх файлаа илгээгээд хуудасны доод талын «Дууслаа» товчийг дарвал үнийн санал энд ирнэ.`, [["Цуцлах", "FLOW_CANCEL"]]);
 }
 
 // upload.js-ийн «Дууслаа» → үнийн санал гарсны дараа дуудагдана
@@ -123,7 +162,7 @@ async function askPayment(psid, f) {
 async function startJob(psid, f) {
   const base = `http://127.0.0.1:${process.env.PORT || 3000}`, headers = { "Content-Type": "application/json", "x-api-key": process.env.API_KEY || "" };
   const mkt = f.product === "marketing";
-  const body = mkt ? { psid, conversation: (f.conv || []).map((m) => `${m.role}: ${m.text}`).join("\n") } : { psid, product: f.product, conversation: (f.conv || []).map((m) => `${m.role}: ${m.text}`).join("\n") };
+  const body = mkt ? { psid, conversation: (f.conv || []).map((m) => `${m.role}: ${m.text}`).join("\n") } : { psid, product: f.product, period: PER.clean(f.period) || undefined, periodYear: f.periodYear || undefined, conversation: (f.conv || []).map((m) => `${m.role}: ${m.text}`).join("\n") };
   const r = await fetch(base + (mkt ? "/mkt/jobs" : "/org/jobs"), { method: "POST", headers, body: JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
@@ -156,7 +195,9 @@ async function handle({ psid, text, payload, attachments }) {
     if (payload.startsWith("FLOW_G_")) return showMenu(psid, payload.slice(7));
   }
   if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { await setF(psid, { s: "left" }); return toMenu(psid, "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
-  if (payload.startsWith("FLOW_P_") && PRODUCTS[payload.slice(7)]) { await startOrg(psid, f, payload.slice(7)); await setF(psid, f); return "ext"; }
+  if (payload.startsWith("FLOW_P_") && PRODUCTS[payload.slice(7)]) return askPeriod(psid, payload.slice(7));
+  if (payload.startsWith("FLOW_T_") && f.s === "choose" && f.product) return pickType(psid, f, payload.slice(7));
+  if (payload.startsWith("FLOW_N_") && f.s === "choose" && f.product && f.ptype) return pickN(psid, f, Number(payload.slice(7)));
 
   switch (f.s) {
     case "mkt_interview": {
@@ -176,7 +217,7 @@ async function handle({ psid, text, payload, attachments }) {
         f.s = "payment_review"; f.receipt = img.payload && img.payload.url; await setF(psid, f);
         await send(psid, "Баярлалаа! Төлбөрийн баримтыг хүлээн авлаа ✅ Шалгаад баталгаажмагц боловсруулж эхэлнэ.");
         if (ADMIN()) { await sendImage(ADMIN(), f.receipt);
-          await send(ADMIN(), `💳 Төлбөрийн баримт ирлээ\nҮйлчилгээ: ${NAMES[f.product]}\nДүн: ${fmtMoney(f.price || 0)}${f.units ? ` (${f.units} хуудас)` : ""}\nЗахиалагч: ${psid}\n\nДанс руугаа орж шалгаад сонгоно уу.`, [["✅ Батлах", `PAYOK|${psid}`], ["❌ Татгалзах", `PAYNO|${psid}`]]); }
+          await send(ADMIN(), `💳 Төлбөрийн баримт ирлээ\nҮйлчилгээ: ${NAMES[f.product]}${PER.clean(f.period) ? ` (${PER.shortText(f.period)})` : ""}\nДүн: ${fmtMoney(f.price || 0)}${f.units ? ` (${f.units} хуудас)` : ""}\nЗахиалагч: ${psid}\n\nДанс руугаа орж шалгаад сонгоно уу.`, [["✅ Батлах", `PAYOK|${psid}`], ["❌ Татгалзах", `PAYNO|${psid}`]]); }
         return "ext";
       }
       if (atts.length) { await send(psid, "Төлбөрийн баримтыг зураг (screenshot) хэлбэрээр илгээнэ үү."); return "ext"; }
@@ -190,12 +231,16 @@ async function handle({ psid, text, payload, attachments }) {
       await send(psid, "Таны захиалгыг боловсруулж байна ⏳ Бэлэн болмогц файлаар илгээнэ. Материалын хэмжээнээс хамаарч 30–90 минут болно."); return "ext";
     }
     case "choose": {
-      const n = (text.match(/^\s*([1-3])\s*[.)]?\s*$/) || [])[1];
-      const pick = n && PICK[f.menu] && PICK[f.menu][Number(n) - 1];
+      const R = { i: 1, ii: 2, iii: 3, iv: 4 };
+      const mm = text.match(/^\s*(\d{1,2}|iv|iii|ii|i)\s*([.)]|-?р)?\s*(сар|улирал|хагас(\s*жил)?)?\s*$/i);
+      const n = mm ? (R[mm[1].toLowerCase()] || Number(mm[1])) : null;
+      const pick = n && PICK[f.menu] && PICK[f.menu][n - 1];
       if (pick && pick.startsWith("G:")) return showMenu(psid, pick.slice(2));
-      if (pick) { await startOrg(psid, f, pick); await setF(psid, f); return "ext"; }
-      if (!PICK[f.menu]) return showMenu(psid, "group");
-      await send(psid, `Доорх товчноос сонгох эсвэл дугаарыг нь (1, 2, 3) бичээд илгээнэ үү.`, BTN[f.menu]); return "ext"; }
+      if (pick && pick.startsWith("T:") && f.product) return pickType(psid, f, pick.slice(2));
+      if (pick && pick.startsWith("N:") && f.product && f.ptype) return pickN(psid, f, Number(pick.slice(2)));
+      if (pick && PRODUCTS[pick]) return askPeriod(psid, pick);
+      if (!PICK[f.menu] || (/^per/.test(f.menu) && !f.product)) return showMenu(psid, "group");
+      await send(psid, `Доорх товчноос сонгох эсвэл дугаарыг нь бичээд илгээнэ үү.`, BTN[f.menu]); return "ext"; }
     default:
       await setF(psid, { s: "left" }); return toMenu(psid);
   }

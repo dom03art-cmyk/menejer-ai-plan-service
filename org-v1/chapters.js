@@ -10,8 +10,7 @@ const ROLE = {
   report_dir: "Чи Монголын компанийн гүйцэтгэх захиралд ТУЗ-д тавих жилийн тайлан бэлтгэдэг туршлагатай зөвлөх. Гүйцэтгэх захирлын нэрийн өмнөөс ТУЗ-д тавих тайлангийн нэг хэсгийг бичнэ.",
 };
 
-function style(product) {
-  const outline = OUTLINES[product];
+function style(product, outline = OUTLINES[product]) {
   const report = product !== "plan";
   return `${ROLE[product]}
 Дүрэм:
@@ -42,7 +41,7 @@ ${outline.filter((o) => o.t && o.lvl <= 2).map((o) => o.t).join("; ")}
 }
 
 const STYLES = {};
-const styleFor = (p) => (STYLES[p] = STYLES[p] || style(p));
+const styleFor = (p, outline = OUTLINES[p]) => { const k = outline === OUTLINES[p] ? p : p + "|" + outline.map((o) => o.t || "").join("|"); return (STYLES[k] = STYLES[k] || style(p, outline)); };
 
 function researchFor(item, r) {
   if (!r) return [];
@@ -70,8 +69,8 @@ async function writeSection(item, ctx) {
   if (!ctx._cached) ctx._cached = cachedCtx(ctx);
   const facts = researchFor(item, ctx.research);
   const scope = (ctx.product === "report_dept" || ctx.product === "plan_dept") && ctx.A.org_wide ? `ХАМРАХ ХҮРЭЭ: Материалд байгууллагын хэмжээний мэдээлэл (санхүүгийн тайлан, олон хэлтэс, ТУЗ-ийн шийдвэр) байгаа ч энэ бол ЗӨВХӨН «${ctx.A.unit_name || "тайлагнагч нэгж"}»-ийн ажлын ${ctx.product === "plan_dept" ? "төлөвлөгөө" : "тайлан"}. Байгууллагын санхүүгийн үр дүнг шинжлэх, ТУЗ-ийн шийдвэрийн биелэлт, бусад хэлтсийн ажлыг дүгнэх, ТУЗ-д шийдүүлэх асуудал бичихгүй; зөвхөн энэ нэгжид хамаарах баримтыг ашигла.\n\n` : "";
-  const user = scope + `${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts).slice(0, 14000) + "\n\n" : ""}БИЧИХ ХЭСЭГ:\n- id "${item.id}" — ${item.t}: доод тал нь ${item.words || 100} үг. ${item.guide || ""}${item.attach ? " [Код оруулах: " + item.attach.join(", ") + "]" : ""}`;
-  const out = await callJSON({ system: styleFor(ctx.product), cached: ctx._cached, user, maxTokens: item.maxTokens || Number(process.env.ORG_SECTION_MAX_TOKENS || 16000) });
+  const user = (ctx.periodNote || "") + scope + `${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts).slice(0, 14000) + "\n\n" : ""}БИЧИХ ХЭСЭГ:\n- id "${item.id}" — ${item.t}: доод тал нь ${item.words || 100} үг. ${item.guide || ""}${item.attach ? " [Код оруулах: " + item.attach.join(", ") + "]" : ""}`;
+  const out = await callJSON({ system: styleFor(ctx.product, ctx.outline || OUTLINES[ctx.product]), cached: ctx._cached, user, maxTokens: item.maxTokens || Number(process.env.ORG_SECTION_MAX_TOKENS || 16000) });
   const sec = (out.sections || []).find((s) => String(s.id) === item.id) || (out.sections || [])[0];
   return fixText(sanitize(sec && Array.isArray(sec.blocks) ? sec.blocks.filter((b) => b && b.type) : []));
 }
@@ -81,7 +80,7 @@ const fixText = (x) => typeof x === "string" ? x.replace(/\\+(?=\s|$|[.,;:)])/g,
   : Array.isArray(x) ? x.map(fixText) : x && typeof x === "object" ? Object.fromEntries(Object.entries(x).map(([k, v]) => [k, k === "type" ? v : fixText(v)])) : x;
 
 async function writeAll(ctx, concurrency = Number(process.env.ORG_CONCURRENCY || 3), onProgress = () => { }) {
-  const items = OUTLINES[ctx.product].filter((o) => o.group !== "static" && (o.words || o.guide));
+  const items = (ctx.outline || OUTLINES[ctx.product]).filter((o) => o.group !== "static" && (o.words || o.guide));
   const order = [...items.filter((o) => o.group !== "summary"), ...items.filter((o) => o.group === "summary")];
   const firstSum = order.findIndex((o) => o.group === "summary");
   const result = {}; let idx = 0, done = 0, fatal = null;
@@ -108,7 +107,7 @@ async function writeAll(ctx, concurrency = Number(process.env.ORG_CONCURRENCY ||
 // Claude дуудахгүй туршилт
 function writeAllMock(ctx) {
   const out = {};
-  for (const o of OUTLINES[ctx.product]) if (o.group !== "static" && (o.words || o.guide)) {
+  for (const o of (ctx.outline || OUTLINES[ctx.product])) if (o.group !== "static" && (o.words || o.guide)) {
     const b = [{ type: "p", text: `**${o.id}:** ` + "Энэ бол угсралтыг шалгах туршилтын догол мөр. ".repeat(Math.max(2, Math.round((o.words || 100) / 40))) },
       { type: "table", caption: "Туршилтын хүснэгт", headers: ["Үзүүлэлт", "Утга"], rows: [["Нэг", "1 500 000 ₮"], ["!Нийт", "1 500 000 ₮"]] }];
     if (o.id === "9.1") b.push({ type: "gantt", title: "Жилийн зураглал", periods: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"], tasks: [{ name: "Бэлтгэл", start: 0, length: 2 }, { name: "Төсөл", start: 2, length: 8 }] });

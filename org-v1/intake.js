@@ -58,18 +58,18 @@ async function notesFrom(docs, system, log) {
 
 const DIRECT_LIMIT = Number(process.env.ORG_DIRECT_LIMIT || 120000);
 
-async function planIntake({ conversation = "", docs = [], year }, log = console.log) {
+async function planIntake({ conversation = "", docs = [], year, period = null }, log = console.log) {
   const total = docs.reduce((s, d) => s + d.text.length, 0);
   let material;
   if (total <= DIRECT_LIMIT) material = "МАТЕРИАЛ (бүтэн текст):\n" + docs.map(d => `=== Файл: ${d.name} ===\n${d.text}`).join("\n\n");
   else material = "МАТЕРИАЛААС ТҮҮВЭРЛЭСЭН БАРИМТ (хэсэг бүрээр):\n" + JSON.stringify(await notesFrom(docs, PLAN_NOTES, log));
   const Y = year || new Date().getFullYear() + 1;
   const r = await callJSON({ system: PLAN_BUILD, model: WRITER, maxTokens: 24000,
-    user: `Төлөвлөх он: ${Y} (захиалагч өөр он хэлсэн бол түүнийг ав).\n\nЗАХИАЛАГЧИЙН ЯРИА:\n${String(conversation).slice(0, 20000) || "(байхгүй)"}\n\n${material}` });
+    user: `Төлөвлөх он: ${Y}${period ? "" : " (захиалагч өөр он хэлсэн бол түүнийг ав)"}.${period ? `\nТӨЛӨВЛӨГӨӨНИЙ ХУГАЦАА: ${period.full}. cfg-д байгууллагын ${Y} оны бүтэн 12 сарын загварыг өгнө (орлого, орон тоо, зардал ердийнхөөрөө), харин төсөл, санаачилга (initiatives), хөрөнгө оруулалтыг энэ хугацаанд (${period.range}) хийгдэхээр төлөвлө. Тооцоо зөвхөн энэ хугацааны саруудыг авна.` : ""}\n\nЗАХИАЛАГЧИЙН ЯРИА:\n${String(conversation).slice(0, 20000) || "(байхгүй)"}\n\n${material}` });
   const A = r.A || {}, cfg = r.cfg || {};
   A.org_name = A.org_name || cfg.org_name || "Байгууллага"; cfg.org_name = cfg.org_name || A.org_name;
   cfg.org_type = cfg.org_type || A.org_type; A.org_type = cfg.org_type;
-  if (!cfg.year) cfg.year = Y;
+  if (!cfg.year || period) cfg.year = Y;
   if (cfg.org_type && cfg.org_type !== "company" && cfg.tax_rate === undefined) cfg.tax_rate = 0;
   A.missing_info = (A.missing_info || []).map(String).slice(0, 12); A.assumed_fields = (A.assumed_fields || []).map(String).slice(0, 30);
   A.brand = { name: A.org_name, slogan: A.slogan || "" };

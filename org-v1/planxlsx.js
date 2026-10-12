@@ -18,7 +18,7 @@ const IC = Array.from({ length: 12 }, (_, i) => col(9 + i)), IU = "U";
 
 function buildXlsx(A, cfg0, res) {
   const ExcelJS = require("exceljs");
-  const c = normalizeCfg(cfg0), L = res.labels, Y = c.year, org = (A && A.org_name) || c.org_name, S = res.series;
+  const c = normalizeCfg(cfg0), L = res.labels, Y = c.year, YG = c.period_gen || `${Y} оны`, YN = c.period_full || `${Y} он`, ACT = c.active || null, org = (A && A.org_name) || c.org_name, S = res.series;
   const wb = new ExcelJS.Workbook();
   wb.creator = "Менежер AI"; wb.created = new Date(); wb.calcProperties = { fullCalcOnLoad: true };
   const checks = [];
@@ -28,7 +28,7 @@ function buildXlsx(A, cfg0, res) {
     const ws = wb.addWorksheet(name, { views: [freeze ? { state: "frozen", xSplit: freeze[0], ySplit: freeze[1], showGridLines: false } : { showGridLines: false }] });
     widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     ws.pageSetup = { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 } };
-    ws.headerFooter = { oddFooter: `&L&8${org.replace(/&/g, "&&")} — ${Y} оны төсөв&C&8${name}&R&8&P / &N` };
+    ws.headerFooter = { oddFooter: `&L&8${org.replace(/&/g, "&&")} — ${YG} төсөв&C&8${name}&R&8&P / &N` };
     return ws;
   };
   const font = (o = {}) => ({ name: "Times New Roman", size: 11, ...o });
@@ -80,7 +80,7 @@ function buildXlsx(A, cfg0, res) {
   const T$ = q(S_IN);
 
   // ───────────── 1. ТААМАГЛАЛ (оролт) ─────────────
-  title(wi, `${org} — ${Y} оны төсвийн таамаглал`, "Шар нүд = оролт. Шар нүдийг өөрчлөхөд бусад бүх хуудас автоматаар дахин тооцогдоно.");
+  title(wi, `${org} — ${YG} төсвийн таамаглал`, "Шар нүд = оролт. Шар нүдийг өөрчлөхөд бусад бүх хуудас автоматаар дахин тооцогдоно.");
   let r = 4; section(wi, r, "Ерөнхий үзүүлэлт", 3); r++; head(wi, r, ["Үзүүлэлт", "Утга", "Тайлбар"]); r++;
   const P = {};
   const params = [
@@ -180,7 +180,7 @@ function buildXlsx(A, cfg0, res) {
   const Tr = (cc, row) => `${T$}$${cc}$${row}`, Trng = (cc, a, b) => `${T$}$${cc}$${a}:$${cc}$${b}`;
 
   // ───────────── 2. ОРЛОГО ─────────────
-  title(wInc, `${L.income} — ${Y} он`, "Бүх нүд томьёо — «Таамаглал» хуудаснаас тооцогдоно.");
+  title(wInc, `${L.income} — ${YN}`, "Бүх нүд томьёо — «Таамаглал» хуудаснаас тооцогдоно.");
   monthHead(wInc, 4, ["Тоо хэмжээ / дүн", "Нэгж", "Хэмжих нэгж"]);
   r = 5; const Q0 = r;
   incomeIn.forEach((ln, k) => {
@@ -216,7 +216,7 @@ function buildXlsx(A, cfg0, res) {
   note(wInc, r + 2, "Шууд зардал = тоо хэмжээ × нэгжийн өртөг + орлого × шууд зардлын хувь.");
 
   // ───────────── 3. ЦАЛИН ─────────────
-  title(wPay, `Орон тоо, цалин — ${Y} он`, "Бүх нүд томьёо. Цалинг «Таамаглал» хуудасны орон тоо, цалин, эхлэх/дуусах сар, нэмэгдлээр тооцно.");
+  title(wPay, `Орон тоо, цалин — ${YN}`, "Бүх нүд томьёо. Цалинг «Таамаглал» хуудасны орон тоо, цалин, эхлэх/дуусах сар, нэмэгдлээр тооцно.");
   monthHead(wPay, 4, ["Албан тушаал", "Нэгж", "Орон тоо"]);
   r = 5; const SP0 = r;
   staffIn.forEach((s, k) => {
@@ -234,12 +234,12 @@ function buildXlsx(A, cfg0, res) {
   MC.forEach((cc, i) => f(wPay, r, 4 + i, `${cc}${PAY_T}+${cc}${SI_R}`, NUM, { bold: true, total: true })); sumRow(wPay, r, { total: true }); r++;
   const HC_R = r; put(wPay, r, 1, "Орон тоо (тухайн сард)", null, { bold: true });
   MC.forEach((cc, i) => f(wPay, r, 4 + i, `SUMPRODUCT((${Trng("E", ST0, ST1)}<=${cc}$3)*(${Trng("F", ST0, ST1)}>=${cc}$3)*${Trng("C", ST0, ST1)})`, "0.##"));
-  f(wPay, r, TOTC, `SUM(${MC[0]}${r}:${MC[11]}${r})/12`, "0.0", { bold: true });
+  f(wPay, r, TOTC, `SUM(${MC[0]}${r}:${MC[11]}${r})/${ACT ? ACT[1] - ACT[0] + 1 : 12}`, "0.0", { bold: true });
   S.headcount.forEach((v, i) => chk(S_PAY, r, 4 + i, v, `Орон тоо / ${MN[i]}`, 0.001)); chk(S_PAY, r, TOTC, res.totals.headcount_avg, "Дундаж орон тоо", 0.001);
   note(wPay, r + 2, "«Орон тоо» мөрийн жилийн баганад дундаж орон тоо. Цалингийн нэмэгдэл «Таамаглал» хуудсанд заасан сараас бүх ажилтанд үйлчилнэ.");
 
   // ───────────── 4. ЗАРДАЛ ─────────────
-  title(wExp, `Үйл ажиллагааны зардал, хөрөнгө оруулалт — ${Y} он`, "Бүх нүд томьёо — «Таамаглал» хуудаснаас тооцогдоно.");
+  title(wExp, `Үйл ажиллагааны зардал, хөрөнгө оруулалт — ${YN}`, "Бүх нүд томьёо — «Таамаглал» хуудаснаас тооцогдоно.");
   monthHead(wExp, 4, ["Зардал", "Нэгж", "Бүлэг"]);
   r = 5; const E0 = r;
   expIn.forEach((e, k) => {
@@ -298,17 +298,17 @@ function buildXlsx(A, cfg0, res) {
   const D0 = r;
   for (const x of capRows) {
     label(wExp, r, 1, `A${x.r}`);
-    MC.forEach((cc, i) => f(wExp, r, 4 + i, x.kind === "init"
+    MC.forEach((cc, i) => f(wExp, r, 4 + i, (x.kind === "init"
       ? `IF(AND(${Tr("G", x.t)}=1,${cc}$3>${Tr("D", x.t)}),${Tr("F", x.t)}/${Tr("H", x.t)}/12,0)`
-      : `IF(${cc}$3>${Tr("C", x.t)},${Tr("D", x.t)}/${Tr("E", x.t)}/12,0)`));
+      : `IF(${cc}$3>${Tr("C", x.t)},${Tr("D", x.t)}/${Tr("E", x.t)}/12,0)`) + (ACT ? `*IF(AND(${cc}$3>=${ACT[0]},${cc}$3<=${ACT[1]}),1,0)` : "")));
     sumRow(wExp, r); r++;
   }
-  put(wExp, r, 1, "Одоо байгаа хөрөнгийн элэгдэл"); MC.forEach((cc, i) => f(wExp, r, 4 + i, `${P.dep}`)); sumRow(wExp, r); r++;
+  put(wExp, r, 1, "Одоо байгаа хөрөнгийн элэгдэл"); MC.forEach((cc, i) => f(wExp, r, 4 + i, ACT ? `IF(AND(${cc}$3>=${ACT[0]},${cc}$3<=${ACT[1]}),${P.dep},0)` : `${P.dep}`)); sumRow(wExp, r); r++;
   const DEP_T = r; totalRow(wExp, r, "Нийт элэгдэл", D0, r - 1); chkMonths(S_EXP, r, S.depreciation, "Элэгдэл");
   note(wExp, r + 2, "Элэгдлийг худалдан авсны дараа сараас шулуун шугамаар тооцно. Элэгдэл ашигт нөлөөлнө, мөнгөн урсгалд нөлөөлөхгүй.");
 
   // ───────────── 5. НЭГТГЭЛ (орлого-зардал ба мөнгөн урсгал) ─────────────
-  title(wPl, `${org} — ${Y} оны нэгтгэсэн төсөв ба мөнгөн урсгал`, "Бүх мөр бусад хуудаснаас томьёогоор бодогдоно. Энэ хуудсанд гараар тоо оруулахгүй.");
+  title(wPl, `${org} — ${YG} нэгтгэсэн төсөв ба мөнгөн урсгал`, "Бүх мөр бусад хуудаснаас томьёогоор бодогдоно. Энэ хуудсанд гараар тоо оруулахгүй.");
   monthHead(wPl, 4, ["Үзүүлэлт (₮)", "", ""], ["I улирал", "II улирал", "III улирал", "IV улирал"]);
   const plRows = [["income", L.income, true], ["direct", L.direct], ["gross", L.gross, true], ["payroll", "Цалин"], ["si", "Ажил олгогчийн НДШ"], ["opex", "Үйл ажиллагааны зардал"],
     ["initiative_opex", "Төсөл, хөтөлбөрийн зардал"], ["depreciation", "Элэгдэл"], ["op", L.op, true], ["interest", "Зээлийн хүү"], ["ebt", L.pre, true], ["tax", "Орлогын албан татвар"], ["net", L.result, true]];
@@ -358,13 +358,13 @@ function buildXlsx(A, cfg0, res) {
   const PL = (k, cc = TOT) => `'${S_PL}'!$${cc}$${RW[k]}`;
 
   // ───────────── 6. ХЭЛТСЭЭР ─────────────
-  title(wD, `Нэгж, хэлтсийн төсөв — ${Y} он`, "Нэгжийн нэр «Таамаглал» хуудасны «Нэгж» баганатай яг ижил бичигдсэн байх ёстой.");
+  title(wD, `Нэгж, хэлтсийн төсөв — ${YN}`, "Нэгжийн нэр «Таамаглал» хуудасны «Нэгж» баганатай яг ижил бичигдсэн байх ёстой.");
   head(wD, 4, ["Нэгж", "Орон тоо (жилийн эцэст)", "Орлого (₮)", "Шууд зардал (₮)", "Цалин + НДШ (₮)", "Үйл ажиллагааны ба төслийн зардал (₮)", "Хөрөнгө оруулалт (₮)", "Нийт төсөв (₮)", "Хувь"]); wD.getRow(4).height = 44;
   const depts = res.depts.length ? res.depts.slice() : ["Нийтлэг"];
   const N0 = 5, NT = N0 + depts.length;
   depts.forEach((d, k) => {
     const rr = N0 + k; put(wD, rr, 1, d);
-    f(wD, rr, 2, `SUMPRODUCT((${Trng("B", ST0, ST1)}=A${rr})*(${Trng("F", ST0, ST1)}>=12)*${Trng("C", ST0, ST1)})`, "0.##");
+    f(wD, rr, 2, `SUMPRODUCT((${Trng("B", ST0, ST1)}=A${rr})*(${Trng("F", ST0, ST1)}>=${ACT ? ACT[1] : 12})${ACT ? `*(${Trng("E", ST0, ST1)}<=${ACT[1]})` : ""}*${Trng("C", ST0, ST1)})`, "0.##");
     f(wD, rr, 3, `SUMIF('${S_INC}'!$B$${RV0}:$B$${RV1},A${rr},'${S_INC}'!$${TOT}$${RV0}:$${TOT}$${RV1})`);
     f(wD, rr, 4, `SUMIF('${S_INC}'!$B$${DR0}:$B$${DR1},A${rr},'${S_INC}'!$${TOT}$${DR0}:$${TOT}$${DR1})`);
     f(wD, rr, 5, `SUMIF('${S_PAY}'!$B$${SP0}:$B$${SP1},A${rr},'${S_PAY}'!$${TOT}$${SP0}:$${TOT}$${SP1})*(1+${P.si})`);
@@ -381,7 +381,7 @@ function buildXlsx(A, cfg0, res) {
   note(wD, NT + 2, "Нийт төсөв = шууд зардал + цалин, НДШ + үйл ажиллагааны ба төслийн зардал + хөрөнгө оруулалт. Элэгдэл, хүү, татвар байгууллагын түвшинд тооцогдоно.");
 
   // ───────────── 7. ГҮЙЦЭТГЭЛ ─────────────
-  title(wA, `Төлөвлөгөө ба гүйцэтгэл — ${Y} он`, "Сар дуусах бүрд «Гүйцэтгэл» мөрийн шар нүдэнд бодит дүнгээ оруулна. Зөрүү, биелэлтийн хувь, өссөн дүн автоматаар гарна.");
+  title(wA, `Төлөвлөгөө ба гүйцэтгэл — ${YN}`, "Сар дуусах бүрд «Гүйцэтгэл» мөрийн шар нүдэнд бодит дүнгээ оруулна. Зөрүү, биелэлтийн хувь, өссөн дүн автоматаар гарна.");
   monthHead(wA, 4, ["Үзүүлэлт (₮)", "", ""]); wA.getCell(4, TOTC).value = "Өссөн дүн";
   const items = [[L.income, (cc) => `'${S_PL}'!${cc}${RW.income}`, true]];
   if (res.totals.direct) items.push([L.direct, (cc) => `'${S_PL}'!${cc}${RW.direct}`, true]);
@@ -407,7 +407,7 @@ function buildXlsx(A, cfg0, res) {
   note(wA, r, "«Өссөн дүн» баганын төлөвлөгөө нь зөвхөн гүйцэтгэл оруулсан саруудын төлөвлөгөөний нийлбэр. Зардлын мөрөнд зөрүү эерэг бол хэтрэлт.");
 
   // ───────────── 8. ХУРААНГУЙ ─────────────
-  title(w0, `${org} — ${Y} оны төсвийн хураангуй`, "Гол үзүүлэлтүүд бусад хуудаснаас томьёогоор бодогдоно.");
+  title(w0, `${org} — ${YG} төсвийн хураангуй`, ACT ? `Хугацаа: ${YN}. Хугацаанаас гадуурх саруудын орлого, зардал 0 байна. Гол үзүүлэлтүүд бусад хуудаснаас томьёогоор бодогдоно.` : "Гол үзүүлэлтүүд бусад хуудаснаас томьёогоор бодогдоно.");
   r = 4; section(w0, r, "Гол үзүүлэлт", 3); r++; head(w0, r, ["Үзүүлэлт", "Утга", "Тайлбар"]); r++;
   const K = {};
   const kpi = (key, lbl, formula, fmt, nt, exp, tol = 1) => { put(w0, r, 1, lbl); f(w0, r, 2, formula, fmt); put(w0, r, 3, nt || "").font = font({ size: 9, color: { argb: GRAY } }); K[key] = `$B$${r}`; chk(S_SUM, r, 2, exp, lbl, tol); r++; };
@@ -433,8 +433,9 @@ function buildXlsx(A, cfg0, res) {
   kpi("open", "Жилийн эхний мөнгөн үлдэгдэл (₮)", P.cash, NUM, "", c.opening_cash);
   kpi("close", "Жилийн эцсийн мөнгөн үлдэгдэл (₮)", `'${S_PL}'!$O$${CR.close}`, NUM, "", Tt.closing_cash);
   kpi("min", "Хамгийн бага мөнгөн үлдэгдэл (₮)", `MIN('${S_PL}'!$D$${CR.close}:$O$${CR.close})`, NUM, `Тооцоогоор ${KP.min_cash_label}ын эцэст`, Tt.min_cash);
-  kpi("hc0", "Орон тоо (1-р сар)", `'${S_PAY}'!$D$${HC_R}`, "0.##", "", Tt.headcount_start, 0.001);
-  kpi("hc1", "Орон тоо (12-р сар)", `'${S_PAY}'!$O$${HC_R}`, "0.##", "", Tt.headcount_end, 0.001);
+  const A0 = ACT ? ACT[0] : 1, A1 = ACT ? ACT[1] : 12;
+  kpi("hc0", `Орон тоо (${A0}-р сар)`, `'${S_PAY}'!$${MC[A0 - 1]}$${HC_R}`, "0.##", "", Tt.headcount_start, 0.001);
+  kpi("hc1", `Орон тоо (${A1}-р сар)`, `'${S_PAY}'!$${MC[A1 - 1]}$${HC_R}`, "0.##", "", Tt.headcount_end, 0.001);
 
   r++; section(w0, r, "Улирлаар", 5); r++; head(w0, r, ["Үзүүлэлт (₮)", "I улирал", "II улирал", "III улирал", "IV улирал"]); r++;
   for (const [k, lbl] of [["income", L.income], ["net", L.result]]) {
@@ -458,7 +459,7 @@ function buildXlsx(A, cfg0, res) {
   const yel = put(w0, r, 1, "Шар нүд = оролт («Таамаглал», «Гүйцэтгэл» хуудсанд). Бусад нүд томьёогоор автоматаар тооцогдоно.", null, { input: true, bold: true }); w0.mergeCells(r, 1, r, 4); yel.alignment = { wrapText: true };
 
   // ───────────── 9. ЗААВАР ─────────────
-  title(wh, `${org} — ${Y} оны төсвийн загварыг ашиглах заавар`);
+  title(wh, `${org} — ${YG} төсвийн загварыг ашиглах заавар`);
   [["Шар нүд", "Оролт. Зөвхөн шар нүдийг өөрчилнө. Бусад нүд томьёотой тул гараар дарж бичихгүй."],
     [S_SUM, "Гол үзүүлэлт, улирлын дүн, гурван хувилбар, анхааруулга."],
     [S_IN, "Бүх оролт: НДШ, татварын хувь, эхний мөнгө, цалингийн нэмэгдэл, улирлын жин, орлогын эх үүсвэр, орон тоо, зардал, төсөл, хөрөнгө оруулалт, зээл."],

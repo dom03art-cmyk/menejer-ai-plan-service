@@ -7,6 +7,7 @@ const { runOrg } = require("./pipeline");
 const upload = require("./upload");
 const M = require("./materials");
 const { PRODUCTS } = require("./quote");
+const PER = require("./period");
 const { fbText } = require("../plan-v2/util");
 const { newUsage, withUsage } = require("../plan-v2/claude");
 const router = express.Router();
@@ -35,13 +36,15 @@ async function yieldToOthers(job) {
 async function runJob(job) {
   const parts = PRODUCTS[job.product] && PRODUCTS[job.product].parts;
   if (!parts) return runOrg(job);
-  job.subs = {}; let raw = null;
+  job.subs = {}; let raw = null, per = PER.clean(job.period), perYear = undefined;
   for (const part of parts) {
-    const sub = { ...job, id: `${job.id}-${part}`, product: part, raw, subs: undefined };
+    const sub = { ...job, id: `${job.id}-${part}`, product: part, raw, subs: undefined, period: per, periodYear: perYear };
     job.subs[part] = sub; job.step = `${PRODUCTS[part].name}: эхэлж байна`;
     const timer = setInterval(() => { job.step = `${PRODUCTS[part].name}: ${sub.step || ""}`; }, 5000);
     try { await runOrg(sub); } finally { clearInterval(timer); }
     raw = sub.raw;
+    // Тайлангийн дараах төлөвлөгөө: дараагийн ижил хугацаа (улирлын тайлан → дараагийн улирлын төлөвлөгөө). Жил бол хуучнаараа.
+    if (per && per.type !== "year" && sub.resYear) { const nx = PER.next(per, sub.resYear); per = { type: nx.type, n: nx.n }; perYear = nx.year; }
   }
   job.result = Object.fromEntries(parts.map((p) => [p, job.subs[p].result]));
   job.qc = parts.flatMap((p) => (job.subs[p].qc || []).map((q) => `${p}: ${q}`));
@@ -77,13 +80,13 @@ function pump() {
 router.post("/org/jobs", express.json({ limit: "5mb" }), auth, async (req, res) => {
   if (process.env.ORG_ENABLED !== "1") return res.status(503).json({ error: "org үйлчилгээ идэвхжээгүй (ORG_ENABLED=1)" });
   const { psid, conversation, year, input, digest, A, notify = true } = req.body || {};
-  let product = (req.body || {}).product;
-  if (!product && psid) { const meta = await M.getMeta(psid).catch(() => null); product = meta && meta.product; }
+  let product = (req.body || {}).product, period = PER.clean((req.body || {}).period);
+  if ((!product || !period) && psid) { const meta = await M.getMeta(psid).catch(() => null); if (!product) product = meta && meta.product; if (!period && meta && meta.product === product) period = PER.clean(meta.period); }
   if (!PRODUCTS[product]) return res.status(400).json({ error: "product буруу (plan | report_dept | report_dir | bundle)" });
   if (!input && psid) { const files = await M.listFiles(psid).catch(() => []); if (!files.length && String(conversation || "").trim().length < 200) return res.status(400).json({ error: "материал алга (захиалагч файл илгээгээгүй эсвэл хадгалах хугацаа дууссан)" }); }
   if (!input && !psid) return res.status(400).json({ error: "psid эсвэл input шаардлагатай" });
   if (psid && activeByPsid.has(psid)) return res.status(202).json({ job_id: activeByPsid.get(psid), status: "already_running" });
-  const id = crypto.randomUUID(), job = { id, psid, product, conversation, year, input, digest, A, status: "queued", createdAt: Date.now() };
+  const id = crypto.randomUUID(), job = { id, psid, product, period, periodYear: Number((req.body || {}).periodYear) || undefined, conversation, year, input, digest, A, status: "queued", createdAt: Date.now() };
   jobs.set(id, job); if (psid) activeByPsid.set(psid, id); queue.push(job);
   res.status(202).json({ job_id: id, status: "queued", product, position: queue.length });
   if (psid && notify) fbText(psid, `Таны захиалгыг («${PRODUCTS[product].name}») боловсруулж эхэллээ ⏳ Материалын хэмжээнээс хамаарч 30–90 минут болно. Бэлэн болмогц PDF, Word, Excel файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.`).catch(() => { });
@@ -105,3 +108,4 @@ process.on("SIGTERM", () => { if (shuttingDown) return; shuttingDown = true;
   for (const j of jobs.values()) if ((j.status === "running" || j.status === "queued") && j.psid) hook({ job_id: j.id, psid: j.psid, product: j.product, status: "interrupted" }); });
 setInterval(() => { const now = Date.now(); for (const [id, j] of jobs) if (j.finishedAt && now - j.finishedAt > 24 * 3600e3) jobs.delete(id); }, 3600e3).unref();
 module.exports = router;
+module.exports.runJob = runJob;

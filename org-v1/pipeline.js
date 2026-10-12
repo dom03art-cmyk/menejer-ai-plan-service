@@ -12,6 +12,7 @@ const { buildDoc } = require("./document");
 const { buildPdf } = require("./pdf");
 const OUTLINES = require("./outlines");
 const { PRODUCTS } = require("./quote");
+const PER = require("./period");
 const { fbText, fbFile } = require("../plan-v2/util");
 const { pickTheme } = require("../plan-v2/theme");
 const { checkContent, blockedError } = require("../plan-v2/guard");
@@ -61,16 +62,27 @@ async function runOrg(job, log = console.log) {
 
   step("2/8 мэдээлэл задлан шинжилж байна");
   const plan = P === "plan";
+  // Хугацаа: жил биш (хагас жил, улирал, сар) сонгосон бол per, жил бол null — хуучин урсгал хэвээр
+  const pin = PER.clean(job.period), isSub = !!(pin && pin.type !== "year");
+  let per = null;
   let A, cfg, m, digest = null, res, fin;
   if (plan) {
-    if (job.input) { cfg = job.input; A = { org_name: cfg.org_name, org_type: cfg.org_type, brand: { name: cfg.org_name, slogan: "" }, missing_info: [], assumed_fields: [], ...(job.A || {}) }; }
-    else ({ A, cfg } = await planIntake({ conversation: job.conversation, docs: raw.docs, year: job.year }, log));
+    if (isSub) per = PER.make(pin, job.periodYear || PER.planYear(pin));
+    if (job.input) { cfg = per ? { ...job.input, year: per.year } : job.input; A = { org_name: cfg.org_name, org_type: cfg.org_type, brand: { name: cfg.org_name, slogan: "" }, missing_info: [], assumed_fields: [], ...(job.A || {}) }; }
+    else ({ A, cfg } = await planIntake({ conversation: job.conversation, docs: raw.docs, year: per ? per.year : job.year, period: per }, log));
+    if (per) { cfg = plancalc.clipToPeriod(plancalc.normalizeCfg(cfg), per.months); cfg.period_gen = `${per.year} оны ${per.gen}`; cfg.period_full = per.full; }
     res = plancalc.calculate(cfg); fin = planfin.build(A, cfg, res);
   } else {
-    if (job.input) { m = job.input; A = { org_name: m.org_name, unit_name: m.unit_name, year: m.year, brand: { name: m.org_name, slogan: "" }, missing_info: [], assumed_fields: [] }; digest = job.digest || {}; }
+    if (job.input) { m = JSON.parse(JSON.stringify(job.input)); A = { org_name: m.org_name, unit_name: m.unit_name, year: m.year, brand: { name: m.org_name, slogan: "" }, missing_info: [], assumed_fields: [] }; digest = job.digest || {}; }
     else ({ A, m, digest } = await reportIntake({ conversation: job.conversation, docs: raw.docs, product: P }, log));
-    res = kpicalc.calculate(m); fin = kpifin.build(A, m, res);
+    if (isSub && P === "plan_dept") per = PER.make(pin, job.periodYear || PER.planYear(pin));
+    else if (isSub) { per = PER.make(pin, Number(m.year) || PER.reportYear(pin)); m.months_covered = per.months; m.year = per.year; }
+    res = kpicalc.calculate(m);
+    if (per && P !== "plan_dept") res.period = per.full;
+    fin = kpifin.build(A, m, res);
   }
+  const outline = per ? PER.adaptOutline(OUTLINES[P], per) : OUTLINES[P];
+  if (per) log(`[org ${job.id}] хугацаа: ${per.full}`);
 
   step("3/8 судалгаа");
   let rs = null;
@@ -79,10 +91,10 @@ async function runOrg(job, log = console.log) {
   fin.sources.push(...raw.files.filter((f) => f.ok).map((f) => `Байгууллагын материал: ${f.name}`), "Захиалагчийн өгсөн мэдээлэл", "Төсвийн тооцоо (кодоор тооцсон)");
 
   step("4/8 бүлгүүдийг бичиж байна");
-  const ctx = { product: P, A, facts: fin.facts, digest, research: rs, conversation: job.conversation || "", raw: raw.text || "" };
+  const ctx = { product: P, A, facts: fin.facts, digest, research: rs, conversation: job.conversation || "", raw: raw.text || "", outline, periodNote: PER.note(P, per) };
   const written0 = MOCK() ? writeAllMock(ctx) : await writeAll(ctx, undefined, (g) => log(`[org ${job.id}]   ✓ ${g}`));
   const fz = finalize(written0, A);
-  dedupe(fz.written, OUTLINES[P], fin);
+  dedupe(fz.written, outline, fin);
 
   step("5/8 график");
   const th = pickTheme({ company: { name: A.org_name, industry: A.industry } }, job.conversation);
@@ -90,16 +102,19 @@ async function runOrg(job, log = console.log) {
 
   const Y = plan ? plancalc.normalizeCfg(cfg).year : res.year;
   const meta = plan
-    ? { title: `${Y} ОНЫ ҮЙЛ АЖИЛЛАГААНЫ ТӨЛӨВЛӨГӨӨ, ТӨСӨВ`, subtitle: "", period: `${Y} оны 1-р сар – 12-р сар`, header: `${A.org_name} · ${Y} оны төлөвлөгөө` }
+    ? (per ? { title: `${per.title} ҮЙЛ АЖИЛЛАГААНЫ ТӨЛӨВЛӨГӨӨ, ТӨСӨВ`, subtitle: "", period: per.full, header: `${A.org_name} · ${per.year} оны ${per.gen} төлөвлөгөө` }
+      : { title: `${Y} ОНЫ ҮЙЛ АЖИЛЛАГААНЫ ТӨЛӨВЛӨГӨӨ, ТӨСӨВ`, subtitle: "", period: `${Y} оны 1-р сар – 12-р сар`, header: `${A.org_name} · ${Y} оны төлөвлөгөө` })
     : P === "plan_dept"
-      ? { title: `${res.year + 1} ОНЫ АЖЛЫН ТӨЛӨВЛӨГӨӨ`, subtitle: A.unit_name || A.reporter_title || "", period: `${res.year + 1} оны 1-р сар – 12-р сар`, header: `${A.org_name}${A.unit_name ? " · " + A.unit_name : ""} · ${res.year + 1} оны төлөвлөгөө` }
+      ? (per ? { title: `${per.title} АЖЛЫН ТӨЛӨВЛӨГӨӨ`, subtitle: A.unit_name || A.reporter_title || "", period: per.full, header: `${A.org_name}${A.unit_name ? " · " + A.unit_name : ""} · ${per.year} оны ${per.gen} төлөвлөгөө` }
+        : { title: `${res.year + 1} ОНЫ АЖЛЫН ТӨЛӨВЛӨГӨӨ`, subtitle: A.unit_name || A.reporter_title || "", period: `${res.year + 1} оны 1-р сар – 12-р сар`, header: `${A.org_name}${A.unit_name ? " · " + A.unit_name : ""} · ${res.year + 1} оны төлөвлөгөө` })
     : P === "report_dir"
-      ? { title: "ГҮЙЦЭТГЭХ ЗАХИРЛЫН ТАЙЛАН", subtitle: "Төлөөлөн удирдах зөвлөлд", period: res.period, periodLabel: "Тайлант хугацаа: ", header: `${A.org_name} · Гүйцэтгэх захирлын тайлан` }
-      : { title: "АЖЛЫН ТАЙЛАН", subtitle: A.unit_name || A.reporter_title || "", period: res.period, periodLabel: "Тайлант хугацаа: ", header: `${A.org_name}${A.unit_name ? " · " + A.unit_name : ""} · Ажлын тайлан` };
+      ? { title: "ГҮЙЦЭТГЭХ ЗАХИРЛЫН ТАЙЛАН", subtitle: "Төлөөлөн удирдах зөвлөлд", period: res.period, periodLabel: "Тайлант хугацаа: ", header: `${A.org_name} · Гүйцэтгэх захирлын ${per ? per.gen + " " : ""}тайлан` }
+      : { title: per ? `${per.gen.toUpperCase()} АЖЛЫН ТАЙЛАН` : "АЖЛЫН ТАЙЛАН", subtitle: A.unit_name || A.reporter_title || "", period: res.period, periodLabel: "Тайлант хугацаа: ", header: `${A.org_name}${A.unit_name ? " · " + A.unit_name : ""} · ${per ? per.gen + " а" : "А"}жлын тайлан` };
+  job.resYear = plan ? Y : res.year; job.per = per;
   Object.assign(meta, { city: A.location && A.location.length < 40 ? A.location : "Улаанбаатар хот", year: `${new Date().getFullYear()} он` });
 
   step("6/8 Word, PDF угсарч байна");
-  const outline = OUTLINES[P], args = { A, written: fz.written, fin, charts, th, meta, outline };
+  const args = { A, written: fz.written, fin, charts, th, meta, outline };
   const doc = await buildDoc(args);
   let pdf = null;
   try { pdf = await buildPdf(args); } catch (e) { log(`[org ${job.id}] PDF үүсгэж чадсангүй: ${e.message}`); fz.issues.push("PDF үүсгэж чадсангүй"); }
@@ -107,7 +122,7 @@ async function runOrg(job, log = console.log) {
   step("7/8 Excel");
   job.xlsx = null;
   try {
-    const x = plan ? await planxlsx.makeModel(A, cfg, res) : P === "plan_dept" ? await kpiplanxlsx.makeModel(A, m, res) : await kpixlsx.makeModel(A, m, res);
+    const x = plan ? await planxlsx.makeModel(A, cfg, res) : P === "plan_dept" ? await kpiplanxlsx.makeModel(A, m, res, per) : await kpixlsx.makeModel(A, m, res);
     if (x.ok) job.xlsx = x.buffer; else { fz.issues.push(`Excel тулгалт зөрсөн (${x.bad.length}/${x.total}) — Excel илгээгээгүй`); log(`[org ${job.id}] Excel зөрүү: ${JSON.stringify(x.bad.slice(0, 5))}`); }
   } catch (e) { fz.issues.push("Excel үүсгэж чадсангүй"); log(`[org ${job.id}] Excel алдаа: ${e.message}`); }
 
@@ -132,7 +147,8 @@ async function runOrg(job, log = console.log) {
     const xl = xlsxSent ? (pd ? " Excel файлын «KPI хяналт» хуудсанд зорилт, сар бүрийн гүйцэтгэлээ бичихэд биелэлт автоматаар бодогдоно." : plan ? " Excel файлын шар нүднүүдэд тоогоо өөрчлөхөд төсөв автоматаар дахин тооцогдоно; «Гүйцэтгэл» хуудсанд сар бүрийн бодит дүнгээ бичээрэй." : " Excel файлд үзүүлэлт бүрийн сарын тоо, биелэлтийн тооцоо томьёотойгоор байгаа.") : "";
     const scopeNote = (P === "report_dept" || pd) && A.org_wide ? `\n\nℹ️ Таны илгээсэн материал байгууллагын хэмжээнийх (санхүүгийн тайлан, олон хэлтэс эсвэл ТУЗ-ийн шийдвэр) байсан тул энэ ${pd ? "төлөвлөгөө" : "тайлан"}г зөвхөн «${A.unit_name || "тайлагнагч нэгж"}»-ийн хүрээнд бичлээ. Байгууллагын бүтэн дүгнэлт, санхүүгийн шинжилгээ, ТУЗ-д тавих асуудал хэрэгтэй бол «Гүйцэтгэх захирлын тайлан» үйлчилгээ тохиромжтой.` : "";
     if (scopeNote && process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `ℹ️ Хэлтсийн тайлангийн захиалгад байгууллагын хэмжээний материал ирлээ (${A.org_name}, psid ${job.psid}). Тайланг нэг нэгжийн хүрээнд бичиж, захирлын тайланг санал болгосон.`).catch(() => { });
-    const where = pd ? "Эхлэх газар: 1.1 «Ирэх оны гол чиглэл» ба 3.2 «Зорилт ба KPI»." : plan ? "Эхлэх газар: 1.2 «Ирэх жилийн гол чиглэл, зорилт» ба 1.4 «Эхний 30 хоногт хийх 5 ажил»." : "Эхлэх газар: 1-р бүлэг (товч дүгнэлт) ба хавсралтын «Баталгаажуулах, нөхөх зүйлс» хүснэгт.";
+    const tt = (id) => { const o = outline.find((x) => x.id === id); return o ? o.t.replace(/^(\S+) /, "$1 «") + "»" : id; };
+    const where = per && (pd || plan) ? `Эхлэх газар: ${pd ? tt("1.1") + " ба " + tt("3.2") : tt("1.2") + " ба " + tt("1.4")}.` : pd ? "Эхлэх газар: 1.1 «Ирэх оны гол чиглэл» ба 3.2 «Зорилт ба KPI»." : plan ? "Эхлэх газар: 1.2 «Ирэх жилийн гол чиглэл, зорилт» ба 1.4 «Эхний 30 хоногт хийх 5 ажил»." : "Эхлэх газар: 1-р бүлэг (товч дүгнэлт) ба хавсралтын «Баталгаажуулах, нөхөх зүйлс» хүснэгт.";
     await fbText(job.psid, `✅ Таны захиалсан «${name0}» бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.${xl} Word файлыг нээхэд гарчгийн хуудасны дугаарыг шинэчлэх эсэхийг асуувал «Тийм» гэж дарна уу.
 
 ⚠️ Чухал сануулга: Энэ баримтыг таны илгээсэн материал${plan ? " болон нээлттэй эх сурвалжийн судалгаа" : ""}нд үндэслэн хиймэл оюун ухаан боловсруулсан. Батлуулах, хүргүүлэхээс өмнө заавал уншиж шалгана уу:

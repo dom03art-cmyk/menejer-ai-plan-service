@@ -131,6 +131,29 @@ function normalizeCfg(cfg) {
   return out;
 }
 
+// ───────────── Хугацаагаар хязгаарлах (жил биш төлөвлөгөө) ─────────────
+// Жилийн загварыг хадгалж, хугацаанаас гадуурх сарын орлого, зардал, хөрөнгө оруулалтыг 0 болгоно. cfg нь normalizeCfg-ийн гаралт.
+function clipToPeriod(c, months) {
+  const s = months[0], e = months[months.length - 1], inP = (m) => m >= s && m <= e;
+  const mask = (arr) => arr.map((v, i) => (inP(i + 1) ? v : 0));
+  c.active = [s, e]; c._notes = c._notes || [];
+  for (const ln of c.income) {
+    const w = ln.seasonality || c.seasonality, sw = sum(w);
+    ln.monthly = mask(ln.monthly ? ln.monthly : w.map((x) => (ln.annual * x) / sw)); ln.annual = null; ln.prior = null;
+  }
+  c.staff = c.staff.filter((x) => x.end >= s && x.start <= e).map((x) => ({ ...x, start: Math.max(x.start, s), end: Math.min(x.end, e) }));
+  for (const x of c.expenses) { x.prior = null; if (x.pct_of_income === null) { x.m = mask(x.m); x.mode = "by_month"; } }
+  c.initiatives = c.initiatives.filter((it) => (it.capex ? inP(it.start) : it.end >= s && it.start <= e)).map((it) => {
+    if (it.capex) return it;
+    const ns = Math.max(it.start, s), ne = Math.min(it.end, e), k = (ne - ns + 1) / (it.end - it.start + 1);
+    return { ...it, start: ns, end: ne, budget: Math.round(it.budget * k) };
+  });
+  c.capex = c.capex.filter((x) => inP(x.month));
+  c.loans = c.loans.filter((l) => l.end >= s && l.start <= e).map((l) => ({ ...l, start: Math.max(l.start, s), end: Math.min(l.end, e) }));
+  c.prior = null;
+  return c;
+}
+
 // ───────────── Сар бүрийн тооцоо ─────────────
 // incK — орлогын (тоо хэмжээний) үржүүлэгч, costK — тогтмол үйл ажиллагааны зардал ба төслийн зардлын үржүүлэгч.
 function incomeQty(ln, season) {
@@ -182,7 +205,9 @@ function run(c, incK = 1, costK = 1) {
     return { ...x, monthly, dep, dep_total: sum(dep) };
   });
   R.capex = zeros().map((_, i) => sum(R.capex_items.map((x) => x.monthly[i])));
-  R.depreciation = zeros().map((_, i) => c.existing_depreciation_monthly + sum(R.capex_items.map((x) => x.dep[i])));
+  const inAct = (i) => !c.active || (c.active[0] <= i + 1 && i + 1 <= c.active[1]);
+  R.capex_items.forEach((x) => { x.dep = x.dep.map((v, i) => (inAct(i) ? v : 0)); x.dep_total = sum(x.dep); });
+  R.depreciation = zeros().map((_, i) => (inAct(i) ? c.existing_depreciation_monthly + sum(R.capex_items.map((x) => x.dep[i])) : 0));
   const act = (l, i) => l.start <= i + 1 && i + 1 <= l.end;
   R.interest = zeros().map((_, i) => sum(c.loans.filter((l) => act(l, i)).map((l) => l.monthly_interest)));
   R.loan_principal = zeros().map((_, i) => sum(c.loans.filter((l) => act(l, i)).map((l) => l.monthly_principal)));
@@ -209,13 +234,14 @@ function calculate(cfg0) {
   const L = LABELS[c.org_type];
   const R = run(c);
   const T = R.tot;
+  const [A0, A1] = c.active || [1, 12];
   const months = zeros().map((_, i) => ({
     month: i + 1, label: MN[i], income: R.income[i], direct_cost: R.direct[i], gross: R.gross[i], payroll: R.payroll[i], si: R.si[i], opex: R.opex[i],
     initiative_opex: R.initiative_opex[i], depreciation: R.depreciation[i], op: R.op[i], interest: R.interest[i], ebt: R.ebt[i], tax: R.tax[i], net: R.net[i],
     capex: R.capex[i], loan_principal: R.loan_principal[i], cash_open: R.cash_open[i], cash_in: R.cash_in[i], cash_out: R.cash_out[i], cash: R.cash[i], headcount: R.headcount[i],
   }));
   const totals = { ...T, payroll_total: T.payroll + T.si, opening_cash: c.opening_cash, closing_cash: R.closing_cash, min_cash: R.min_cash,
-    headcount_start: R.headcount[0], headcount_end: R.headcount[11], headcount_avg: sum(R.headcount) / 12, headcount_max: Math.max(0, ...R.headcount),
+    headcount_start: R.headcount[A0 - 1], headcount_end: R.headcount[A1 - 1], headcount_avg: sum(R.headcount) / (A1 - A0 + 1), headcount_max: Math.max(0, ...R.headcount),
     new_hires: sum(c.staff.filter((s) => s.new).map((s) => s.count)), initiatives_budget: sum(c.initiatives.map((x) => x.budget)) };
 
   // Зардлын бүлэг
@@ -236,7 +262,7 @@ function calculate(cfg0) {
     const payroll = sum(R.staff_lines.filter((l) => l.dept === d).map((l) => l.total)) * (1 + c.si_rate);
     const opex = sum([...R.expense_lines, ...R.initiative_lines].filter((l) => l.dept === d).map((l) => l.total));
     const capex = sum(R.capex_items.filter((x) => x.dept === d).map((x) => x.amount));
-    const headcount = sum(c.staff.filter((s) => s.dept === d && s.end >= 12).map((s) => s.count));
+    const headcount = sum(c.staff.filter((s) => s.dept === d && s.end >= A1 && s.start <= A1).map((s) => s.count));
     const cost = direct + payroll + opex + capex;
     by_dept[d] = { income, direct, payroll, opex, capex, cost, headcount };
   }
@@ -290,4 +316,4 @@ function calculate(cfg0) {
 }
 
 const quarterly = (arr) => q4(arr);
-module.exports = { calculate, normalizeCfg, run, quarterly, q4, MN, LABELS, INIT_GROUP, COMMON, money, num, pct, toNum };
+module.exports = { calculate, normalizeCfg, clipToPeriod, run, quarterly, q4, MN, LABELS, INIT_GROUP, COMMON, money, num, pct, toNum };
