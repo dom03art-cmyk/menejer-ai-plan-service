@@ -9,6 +9,7 @@ const { fbText } = require("../plan-v2/util");
 const { PRODUCTS, fmtMoney, priceFor } = require("./quote");
 const PER = require("./period");
 const REV = require("./revise");
+const QP = require("./qpay");
 const router = express.Router();
 const GRAPH = "https://graph.facebook.com/v21.0/me/messages";
 const MKT_PRICE = Number(process.env.MKT_PRICE || 149900);
@@ -143,7 +144,9 @@ async function revStart(psid, part) {
     return "ext";
   }
   const price = REV.REV_PRICE[part] || 29900, pi = payInfo();
-  await setF(psid, { s: "awaiting_payment", rev: { part }, product: part, price });
+  const rf = { s: "awaiting_payment", rev: { part }, product: part, price };
+  await setF(psid, rf);
+  if (await offerQpay(psid, rf, `Нэмэлт засвар — ${NAMES[part]}`, `Энэ баримтын үнэгүй засварын эрх ашиглагдсан байна.\n✏️ Нэмэлт засвар: ${fmtMoney(price)}`)) return "ext";
   await send(psid, `Энэ баримтын үнэгүй засварын эрх ашиглагдсан байна.\n\n✏️ Нэмэлт засвар: ${fmtMoney(price)}\n\n${pi ? pi + "\n\n" : ""}Гүйлгээний утга дээр утасны дугаар + засвар гэж бичнэ үү. Төлбөр шилжүүлсний дараа баримтын зургийг энд илгээнэ үү. Баталгаажмагц засварын хүсэлтээ бичнэ.`, [["Цуцлах", "FLOW_CANCEL"]]);
   if (!pi && ADMIN()) await send(ADMIN(), `⚠️ PAY_INFO тохируулаагүй — ${psid}-д дансны мэдээллийг гараар илгээнэ үү.`);
   return "ext";
@@ -213,13 +216,46 @@ async function onQuote(psid, product, quote) {
   Object.assign(f, { s: "awaiting_payment", product, price: quote.price, units: quote.units });
   await setF(psid, f);
   const pi = payInfo();
+  if (await offerQpay(psid, f, NAMES[product] || "Менежер AI")) return;
   await send(psid, `💳 Төлбөр: ${fmtMoney(quote.price)}\n\n${pi ? pi + "\n\n" : ""}Гүйлгээний утга дээр утасны дугаараа бичнэ үү. Төлбөр шилжүүлсний дараа гүйлгээний баримтын зургийг (screenshot) энд илгээнэ үү. Баталгаажмагц боловсруулж эхэлнэ.${pi ? "" : "\n\nДансны мэдээллийг манай ажилтан удахгүй илгээнэ."}`, [["Материал нэмэх", "FLOW_MORE"], ["Цуцлах", "FLOW_CANCEL"]]);
   if (!pi && ADMIN()) await send(ADMIN(), `⚠️ PAY_INFO (дансны мэдээлэл) тохируулаагүй тул ${psid}-д дансны мэдээллийг гараар илгээнэ үү. Render → Environment-д PAY_INFO нэмнэ үү.`);
+}
+
+// ---- QPay: нэхэмжлэх (QR + банкны апп-ын холбоос) илгээх. QPay тохируулаагүй эсвэл алдаа гарвал false → хуучин (дансаар) урсгал ----
+async function offerQpay(psid, f, desc, head) {
+  if (!QP.enabled() || !(f.price > 0)) return false;
+  try {
+    if (f.qpay && f.qpay.no) await QP.cancelInvoice(f.qpay.no).catch(() => { });
+    const inv = await QP.createInvoice({ psid, amount: f.price, description: `Менежер AI: ${desc}`, kind: "flow" });
+    f.qpay = { no: inv.no, amount: inv.amount, short: inv.short || null }; await setF(psid, f);
+    if (inv.qrUrl) await sendImage(psid, inv.qrUrl);
+    const pi = payInfo();
+    await send(psid, `${head ? head + "\n\n" : ""}💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, боловсруулалт эхэлнэ.${pi ? `\n\nДансаар шилжүүлсэн бол гүйлгээний баримтын зургийг энд илгээнэ үү:\n${pi}` : ""}`,
+      [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]);
+    return true;
+  } catch (e) {
+    console.warn("[flow] QPay нэхэмжлэх:", e.message);
+    if (ADMIN()) await send(ADMIN(), `⚠️ QPay нэхэмжлэх үүсгэж чадсангүй (${psid}): ${String(e.message).slice(0, 200)}. Захиалагчид дансны мэдээлэл илгээгдлээ.`);
+    return false;
+  }
+}
+const qpWait = new Map(); // захиалагч «Шалгах»-ыг хэт олон дарахаас сэргийлнэ (15 сек)
+async function qpCheck(psid, f) {
+  const last = qpWait.get(psid) || 0;
+  if (Date.now() - last < 15000) { await send(psid, "Түр хүлээгээд дахин шалгана уу ⏳"); return "ext"; }
+  qpWait.set(psid, Date.now());
+  let r; try { r = await QP.settle(f.qpay.no, "check"); } catch (e) { console.warn("[flow] QPay шалгах:", e.message); r = "error"; }
+  if (r === "paid" || r === "done") return "ext"; // баталгаажуулах мессежийг handler илгээнэ
+  if (r === "busy") { await send(psid, "Төлбөрийг шалгаж байна ⏳"); return "ext"; }
+  await send(psid, r === "error" ? "Төлбөр шалгахад түр саатал гарлаа. Хэдэн минутын дараа дахин шалгана уу." : `Төлбөр хараахан орж ирээгүй байна. QPay-ээр төлсний дараа «Төлсөн, шалгах» товчийг дахин дарна уу.${f.qpay.short ? "\n\nТөлөх холбоос:\n" + f.qpay.short : ""}`,
+    [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]);
+  return "ext";
 }
 
 async function askPayment(psid, f) {
   f.s = "awaiting_payment"; f.price = f.product === "marketing" ? MKT_PRICE : f.price;
   const pi = payInfo();
+  if (await offerQpay(psid, f, NAMES[f.product] || "Менежер AI")) return;
   await send(psid, `💳 Төлбөр: ${fmtMoney(f.price)}\n\n${pi ? pi + "\n\n" : ""}Гүйлгээний утга дээр утасны дугаараа бичнэ үү. Төлбөр шилжүүлсний дараа гүйлгээний баримтын зургийг (screenshot) энд илгээнэ үү.${pi ? "" : "\n\nДансны мэдээллийг манай ажилтан удахгүй илгээнэ."}`, [["Цуцлах", "FLOW_CANCEL"]]);
   if (!pi && ADMIN()) await send(ADMIN(), `⚠️ PAY_INFO тохируулаагүй — ${psid}-д дансны мэдээллийг гараар илгээнэ үү.`);
 }
@@ -261,7 +297,7 @@ async function handle({ psid, text, payload, attachments }) {
   }
   if (payload === "FLOW_MENU") { await setF(psid, { s: "left" }); return toMenu(psid); }
   if ((payload === "FLOW_REV" || payload.startsWith("FLOW_REVP_")) && !["processing", "payment_review"].includes(f.s)) return payload === "FLOW_REV" ? revMenu(psid) : revStart(psid, payload.slice(10));
-  if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { await setF(psid, { s: "left" }); return toMenu(psid, "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
+  if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { if (f.qpay && f.qpay.no && f.s === "awaiting_payment") await QP.cancelInvoice(f.qpay.no).catch(() => { }); await setF(psid, { s: "left" }); return toMenu(psid, "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
   if (payload.startsWith("FLOW_P_") && PRODUCTS[payload.slice(7)]) return askPeriod(psid, payload.slice(7));
   if (payload.startsWith("FLOW_T_") && f.s === "choose" && f.product) return pickType(psid, f, payload.slice(7));
   if (payload.startsWith("FLOW_N_") && f.s === "choose" && f.product && f.ptype) return pickN(psid, f, Number(payload.slice(7)));
@@ -278,6 +314,7 @@ async function handle({ psid, text, payload, attachments }) {
     case "uploading":
       await send(psid, `Материалаа энэ холбоосоор илгээгээд «Дууслаа» товчийг дарна уу:\n${f.url}`, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     case "awaiting_payment": {
+      if (payload === "FLOW_QPCHECK" && f.qpay) return qpCheck(psid, f);
       if (payload === "FLOW_MORE" && f.url) { f.s = "uploading"; await setF(psid, f); await send(psid, `Нэмэлт материалаа энэ холбоосоор илгээгээд «Дууслаа» дарна уу, үнэ дахин бодогдоно:\n${f.url}`); return "ext"; }
       const img = atts.find(isImage);
       if (img) {
@@ -288,6 +325,7 @@ async function handle({ psid, text, payload, attachments }) {
         return "ext";
       }
       if (atts.length) { await send(psid, "Төлбөрийн баримтыг зураг (screenshot) хэлбэрээр илгээнэ үү."); return "ext"; }
+      if (f.qpay) { await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. QPay-ээр төлөх холбоос:\n${f.qpay.short || ""}\n\nТөлсний дараа «Төлсөн, шалгах» товчийг дарна уу.${payInfo() ? "\n\nДансаар шилжүүлсэн бол баримтын зургийг энд илгээнэ үү." : ""}`, [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
       await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. Шилжүүлсний дараа гүйлгээний баримтын зургийг энд илгээнэ үү.${payInfo() ? "\n\n" + payInfo() : ""}`, f.url ? [["Материал нэмэх", "FLOW_MORE"], ["Цуцлах", "FLOW_CANCEL"]] : [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
     case "rev_request": {
@@ -300,6 +338,7 @@ async function handle({ psid, text, payload, attachments }) {
     case "done":
       await setF(psid, { s: "left" }); return toMenu(psid);
     case "payment_review":
+      if (payload === "FLOW_QPCHECK" && f.qpay) return qpCheck(psid, f);
       await send(psid, "Таны төлбөрийг шалгаж байна. Баталгаажмагц мэдэгдэнэ 🙏"); return "ext";
     case "processing": {
       const st = await jobStatus(f);
@@ -333,17 +372,54 @@ async function admin(payload) {
     await send(psid, "Уучлаарай, таны төлбөр баталгаажсангүй. Дүн, гүйлгээгээ шалгаад баримтаа дахин илгээнэ үү. Асуудал байвал манай ажилтан тантай холбогдоно.");
     await send(ADMIN(), `❌ Татгалзлаа: ${psid}`); return { ok: true };
   }
+  return approve(psid, f, "admin");
+}
+
+// Төлбөр баталгаажсан: админ «Батлах» дарсан эсвэл QPay төлбөр орж ирсэн
+async function approve(psid, f, via) {
+  const tag = via === "qpay" ? `💳 QPay төлбөр орлоо ${fmtMoney((f.qpay && f.qpay.amount) || f.price || 0)} — ` : "";
+  if (via === "admin" && f.qpay && f.qpay.no) await QP.cancelInvoice(f.qpay.no).catch(() => { }); // давхар төлөхөөс сэргийлнэ
   if (f.rev) {
     const last = (await REV.getLast(psid)) || { product: f.rev.part, parts: [f.rev.part], allow: {}, at: Date.now() };
     last.allow = last.allow || {}; last.allow[f.rev.part] = (last.allow[f.rev.part] || 0) + 1; last.at = Date.now(); await REV.setLast(psid, last);
     await setF(psid, { s: "rev_request", part: f.rev.part, product: f.rev.part });
-    await send(psid, `Нэмэлт засварын төлбөр баталгаажлаа ✅\n\nЯмар засвар хийлгэхээ нэг мессежинд дэлгэрэнгүй бичнэ үү: аль хэсэг, юу болгох, зөв тоо.`, [["Цуцлах", "FLOW_CANCEL"]]);
-    await send(ADMIN(), `✅ Нэмэлт засварын төлбөр баталгаажлаа: ${NAMES[f.rev.part]} (${psid})`); return { ok: true };
+    await send(psid, `${via === "qpay" ? "QPay төлбөр амжилттай орлоо. " : ""}Нэмэлт засварын төлбөр баталгаажлаа ✅\n\nЯмар засвар хийлгэхээ нэг мессежинд дэлгэрэнгүй бичнэ үү: аль хэсэг, юу болгох, зөв тоо.`, [["Цуцлах", "FLOW_CANCEL"]]);
+    if (ADMIN()) await send(ADMIN(), `${tag}✅ Нэмэлт засварын төлбөр баталгаажлаа: ${NAMES[f.rev.part]} (${psid})`); return { ok: true };
   }
-  try { await startJob(psid, f); await setF(psid, f); await send(ADMIN(), `✅ Баталлаа, боловсруулж эхэллээ: ${NAMES[f.product]} (${psid})`); }
-  catch (e) { await send(ADMIN(), `⚠️ ${psid}: ажил эхлүүлж чадсангүй — ${e.message}`); await send(psid, "Төлбөр баталгаажлаа ✅ Боловсруулалт эхлэхэд түр саатал гарлаа, манай ажилтан удахгүй эхлүүлнэ."); }
+  if (via === "qpay") await send(psid, "QPay төлбөр амжилттай орлоо ✅ Таны захиалгыг боловсруулж эхэлж байна.");
+  try { await startJob(psid, f); await setF(psid, f); if (ADMIN()) await send(ADMIN(), `${tag}✅ ${via === "qpay" ? "Автоматаар баталгаажиж" : "Баталлаа,"} боловсруулж эхэллээ: ${NAMES[f.product]} (${psid})`); }
+  catch (e) { if (ADMIN()) await send(ADMIN(), `⚠️ ${psid}: ажил эхлүүлж чадсангүй — ${e.message}`); await send(psid, "Төлбөр баталгаажлаа ✅ Боловсруулалт эхлэхэд түр саатал гарлаа, манай ажилтан удахгүй эхлүүлнэ."); }
   return { ok: true };
 }
+
+// QPay төлбөр орж ирэхэд (callback эсвэл «Шалгах»)
+QP.onPaid("flow", async (rec) => {
+  const f = await getF(rec.psid);
+  if (!f || !["awaiting_payment", "payment_review"].includes(f.s) || !f.qpay || f.qpay.no !== rec.no) {
+    if (ADMIN()) await send(ADMIN(), `⚠️ QPay төлбөр ${fmtMoney(rec.paid || rec.amount)} орсон боловч захиалга төлбөр хүлээх төлөвт алга (${rec.psid}, ${f ? f.s : "мэдээлэлгүй"}, нэхэмжлэх ${rec.no}). Гараар шалгана уу.`);
+    return;
+  }
+  await approve(rec.psid, f, "qpay");
+});
+// Бизнес төсөл (Make урсгал): төлбөр орсныг админд «Батлах» товчтой мэдэгдэнэ (Make-ийн APPROVE| урсгал хэвээр)
+const bizPaid = async (rec) => {
+  await send(rec.psid, "QPay төлбөр амжилттай орлоо ✅ Хэдхэн минутын дотор үргэлжлүүлнэ.");
+  const rev = rec.kind === "bizrev";
+  if (ADMIN()) await send(ADMIN(), `💳 QPay төлбөр орлоо (банкаар баталгаажсан): ${fmtMoney(rec.paid || rec.amount)}\n${rev ? "Бизнес төслийн нэмэлт засвар" : "Бизнес төсөл"}\nЗахиалагч: ${rec.psid}\n\nДоорх товчийг дарж үргэлжлүүлнэ үү.`, [["✅ Батлах", `${rev ? "APPROVEREV|" : "APPROVE|"}${rec.psid}`]]);
+};
+QP.onPaid("biz", bizPaid); QP.onPaid("bizrev", bizPaid);
+// Make дуудна: POST /qpay/invoice {psid, amount, kind: "biz"|"bizrev"} → захиалагчид QR ба холбоос илгээнэ
+router.post("/qpay/invoice", express.json(), auth, async (req, res) => {
+  const { psid, amount, kind = "biz" } = req.body || {};
+  if (!psid || !(Number(amount) > 0) || !["biz", "bizrev"].includes(kind)) return res.status(400).json({ ok: false, error: "psid, amount, kind" });
+  if (!QP.enabled()) return res.json({ ok: false, error: "disabled" });
+  try {
+    const inv = await QP.createInvoice({ psid, amount, kind, description: kind === "bizrev" ? "Менежер AI: бизнес төслийн нэмэлт засвар" : "Менежер AI: бизнес төсөл" });
+    if (inv.qrUrl) await sendImage(String(psid), inv.qrUrl);
+    await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц энд мэдэгдэнэ.`);
+    res.json({ ok: true, no: inv.no });
+  } catch (e) { console.warn("[qpay] biz нэхэмжлэх:", e.message); res.json({ ok: false, error: String(e.message).slice(0, 200) }); }
+});
 
 const parseAtt = (a) => { if (typeof a === "string") { try { return JSON.parse(a); } catch (_) { return []; } } return Array.isArray(a) ? a : []; };
 router.post("/flow/message", express.json({ limit: "1mb" }), auth, async (req, res) => {
@@ -363,3 +439,4 @@ module.exports.onDone = onDone;
 module.exports.onRevReject = onRevReject;
 module.exports.handleMessage = handle;
 module.exports.adminAction = admin;
+module.exports._getF = getF;
