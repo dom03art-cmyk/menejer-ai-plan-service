@@ -11,6 +11,9 @@ const router = express.Router();
 const BASE = () => (process.env.QPAY_ENV === "sandbox" ? "https://merchant-sandbox.qpay.mn" : "https://merchant.qpay.mn");
 const PUBLIC = () => (process.env.PUBLIC_URL || "https://menejer-ai-plan-service.onrender.com").replace(/\/$/, "");
 const enabled = () => !!(process.env.QPAY_CLIENT_ID && process.env.QPAY_CLIENT_SECRET && process.env.QPAY_INVOICE_CODE);
+// Туршилтын (sandbox) горимд бодит захиалагчид QPay санал болгохгүй (sandbox QR-ыг бодит банкаар төлөх боломжгүй) —
+// зөвхөн админ болон QPAY_TEST_PSIDS (таслалаар) дахь хүмүүст. Production горимд бүх захиалагчид.
+const allowedFor = (psid) => enabled() && (process.env.QPAY_ENV !== "sandbox" || [process.env.ADMIN_PSID, ...String(process.env.QPAY_TEST_PSIDS || "").split(",")].map((x) => String(x || "").trim()).filter(Boolean).includes(String(psid)));
 let fetchImpl = (...a) => fetch(...a);
 
 // ---- хадгалалт (Redis эсвэл санах ой) ----
@@ -129,6 +132,15 @@ router.get("/qpay/qr/:no.png", async (req, res) => {
   if (!q || !q.png) return res.status(404).end();
   res.set({ "Content-Type": "image/png", "Cache-Control": "private, max-age=86400" }).send(Buffer.from(q.png, "base64"));
 });
-router.get("/qpay/status", (req, res) => res.json({ enabled: enabled(), env: process.env.QPAY_ENV === "sandbox" ? "sandbox" : "production" }));
+// ?check=1 — QPay-д нэвтэрч чадаж байгаа эсэх (token). Нууц мэдээлэл буцаахгүй; минутад 1 удаа.
+let lastCheck = { at: 0, out: null };
+router.get("/qpay/status", async (req, res) => {
+  const out = { enabled: enabled(), env: process.env.QPAY_ENV === "sandbox" ? "sandbox" : "production" };
+  if (req.query.check && enabled()) {
+    if (Date.now() - lastCheck.at < 60e3 && lastCheck.out) out.auth = lastCheck.out;
+    else { try { await token(); out.auth = "ok"; } catch (e) { out.auth = `алдаа: ${String(e.message).replace(/[^\w\s:а-яөүё.-]/gi, "").slice(0, 80)}`; } lastCheck = { at: Date.now(), out: out.auth }; }
+  }
+  res.json(out);
+});
 
-module.exports = { router, enabled, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };
+module.exports = { router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };

@@ -223,7 +223,7 @@ async function onQuote(psid, product, quote) {
 
 // ---- QPay: нэхэмжлэх (QR + банкны апп-ын холбоос) илгээх. QPay тохируулаагүй эсвэл алдаа гарвал false → хуучин (дансаар) урсгал ----
 async function offerQpay(psid, f, desc, head) {
-  if (!QP.enabled() || !(f.price > 0)) return false;
+  if (!QP.allowedFor(psid) || !(f.price > 0)) return false;
   try {
     if (f.qpay && f.qpay.no) await QP.cancelInvoice(f.qpay.no).catch(() => { });
     const inv = await QP.createInvoice({ psid, amount: f.price, description: `Менежер AI: ${desc}`, kind: "flow" });
@@ -412,7 +412,7 @@ QP.onPaid("biz", bizPaid); QP.onPaid("bizrev", bizPaid);
 router.post("/qpay/invoice", express.json(), auth, async (req, res) => {
   const { psid, amount, kind = "biz" } = req.body || {};
   if (!psid || !(Number(amount) > 0) || !["biz", "bizrev"].includes(kind)) return res.status(400).json({ ok: false, error: "psid, amount, kind" });
-  if (!QP.enabled()) return res.json({ ok: false, error: "disabled" });
+  if (!QP.allowedFor(psid)) return res.json({ ok: false, error: "disabled" });
   try {
     const inv = await QP.createInvoice({ psid, amount, kind, description: kind === "bizrev" ? "Менежер AI: бизнес төслийн нэмэлт засвар" : "Менежер AI: бизнес төсөл" });
     if (inv.qrUrl) await sendImage(String(psid), inv.qrUrl);
