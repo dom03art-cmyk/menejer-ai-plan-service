@@ -1,6 +1,6 @@
 // QPay туршилт (QPay, Facebook-ийг дуурайна, бодит дуудлага хийхгүй):  node org-v1/test/qpay-test.js
 delete process.env.REDIS_URL; process.env.FB_PAGE_TOKEN = "fb"; process.env.ADMIN_PSID = "ADM"; process.env.API_KEY = "k"; process.env.PORT = "3999";
-process.env.QPAY_CLIENT_ID = "id"; process.env.QPAY_CLIENT_SECRET = "sec"; process.env.QPAY_INVOICE_CODE = "INV"; process.env.QPAY_ENV = "sandbox";
+process.env.QPAY_CLIENT_ID = "id"; process.env.QPAY_CLIENT_SECRET = "sec"; process.env.QPAY_INVOICE_CODE = "INV"; process.env.QPAY_ENV = "sandbox"; process.env.QPAY_TEST_PSIDS = "C1,C2,C3,C4,B1";
 const fb = [], qp = [], jobs = []; let paid = {}, n = 0;
 global.fetch = async (url, o = {}) => {
   const ok = (j, st = 200) => ({ ok: st < 300, status: st, json: async () => j, text: async () => JSON.stringify(j) });
