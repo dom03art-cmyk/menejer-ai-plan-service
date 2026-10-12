@@ -1,7 +1,7 @@
 // QPay туршилт (QPay, Facebook-ийг дуурайна, бодит дуудлага хийхгүй):  node org-v1/test/qpay-test.js
 delete process.env.REDIS_URL; process.env.FB_PAGE_TOKEN = "fb"; process.env.ADMIN_PSID = "ADM"; process.env.API_KEY = "k"; process.env.PORT = "3999";
 process.env.QPAY_CLIENT_ID = "id"; process.env.QPAY_CLIENT_SECRET = "sec"; process.env.QPAY_INVOICE_CODE = "INV"; process.env.QPAY_ENV = "sandbox"; process.env.QPAY_TEST_PSIDS = "C1,C2,C3,C4,B1";
-const fb = [], qp = [], jobs = []; let paid = {}, n = 0;
+const fb = [], qp = [], jobs = [], hooks = []; let paid = {}, n = 0;
 global.fetch = async (url, o = {}) => {
   const ok = (j, st = 200) => ({ ok: st < 300, status: st, json: async () => j, text: async () => JSON.stringify(j) });
   if (url.startsWith("https://graph.facebook.com")) { fb.push(JSON.parse(o.body)); return ok({}); }
@@ -13,6 +13,7 @@ global.fetch = async (url, o = {}) => {
     if (o.method === "DELETE") return ok({});
     return ok({}, 404);
   }
+  if (url.startsWith("https://hook.test/")) { hooks.push(JSON.parse(o.body)); return ok({}); }
   if (url.includes("127.0.0.1:3999/org/jobs")) { jobs.push(JSON.parse(o.body)); return ok({ job_id: "J" + jobs.length }); }
   return ok({}, 404);
 };
@@ -50,6 +51,14 @@ const texts = (psid) => fb.filter((x) => x.recipient.id === psid).map((x) => (x.
   paid[b.id] = 149900; await QP.settle(b.no);
   const adm = fb.filter((x) => x.recipient.id === "ADM").pop();
   okk(adm.message.quick_replies && adm.message.quick_replies[0].payload === "APPROVE|B1", "бизнес төсөл: админд APPROVE товч очсон");
+  // 7б. Make webhook тохируулсан бол бүрэн автомат
+  process.env.MAKE_PAID_WEBHOOK = "https://hook.test/x"; process.env.MAKE_PAID_KEY = "kk";
+  const b2 = await QP.createInvoice({ psid: "B1", amount: 149900, kind: "biz" }); paid[b2.id] = 149900; await QP.settle(b2.no);
+  okk(hooks.length === 1 && hooks[0].psid === "B1" && hooks[0].kind === "biz" && hooks[0].k === "kk", "бизнес төсөл: Make-д төлөв шилжүүлэх дуудлага очсон");
+  okk(texts("B1").some((t) => t.includes("QPay төлбөр баталгаажлаа") && t.includes("/u/B1.")) && texts("ADM").some((t) => t.includes("автоматаар баталгаажлаа")), "бизнес төсөл: захиалагчид асуулт, файлын холбоос очсон");
+  const r2 = await QP.createInvoice({ psid: "B1", amount: 29900, kind: "bizrev" }); paid[r2.id] = 29900; await QP.settle(r2.no);
+  okk(hooks[1] && hooks[1].kind === "bizrev" && texts("B1").some((t) => t.includes("Нэмэлт засварын QPay")), "нэмэлт засвар: автомат");
+  delete process.env.MAKE_PAID_WEBHOOK;
   // 8. Цуцалбал нэхэмжлэх цуцлагдана
   await flow.onQuote("C3", "report_dept", { price: 49900, units: 5 });
   const f3 = await flow._getF("C3"); await flow.handleMessage({ psid: "C3", payload: "FLOW_CANCEL" });
