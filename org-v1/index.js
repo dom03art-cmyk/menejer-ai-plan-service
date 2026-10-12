@@ -53,10 +53,15 @@ async function runJob(job) {
 function pump() {
   while (running < MAX_PARALLEL && queue.length) {
     const job = queue.shift(); running++; job.status = "running"; job.usage = newUsage();
-    yieldToOthers(job).then(() => withUsage(job.usage, () => runJob(job))).then(() => { job.status = "done"; })
+    yieldToOthers(job).then(() => withUsage(job.usage, () => runJob(job))).then(async () => { job.status = "done"; if (job.psid) await require("./flow").onDone(job).catch((e) => console.warn("[org] onDone:", e.message)); })
       .catch(async (e) => {
         if (shuttingDown) return;
         const name = PRODUCTS[job.product] ? PRODUCTS[job.product].name : job.product;
+        if (e.status === "revision_rejected") {
+          job.status = "revision_rejected"; job.error = e.message; console.warn(`[org ${job.id}] засвар татгалзав: ${e.code}`);
+          if (job.psid) await require("./flow").onRevReject(job, e.message).catch(() => { });
+          return;
+        }
         if (e.status === "blocked") {
           job.status = "blocked"; job.error = e.message; console.warn(`[org ${job.id}] ХААГДСАН`, e.message);
           if (job.psid) await fbText(job.psid, require("../plan-v2/guard").CUSTOMER_MSG).catch(() => { });
@@ -80,16 +85,19 @@ function pump() {
 router.post("/org/jobs", express.json({ limit: "5mb" }), auth, async (req, res) => {
   if (process.env.ORG_ENABLED !== "1") return res.status(503).json({ error: "org үйлчилгээ идэвхжээгүй (ORG_ENABLED=1)" });
   const { psid, conversation, year, input, digest, A, notify = true } = req.body || {};
+  const revision = String((req.body || {}).revision || "").trim().slice(0, 4000) || undefined;
   let product = (req.body || {}).product, period = PER.clean((req.body || {}).period);
   if ((!product || !period) && psid) { const meta = await M.getMeta(psid).catch(() => null); if (!product) product = meta && meta.product; if (!period && meta && meta.product === product) period = PER.clean(meta.period); }
   if (!PRODUCTS[product]) return res.status(400).json({ error: "product буруу (plan | report_dept | report_dir | bundle)" });
-  if (!input && psid) { const files = await M.listFiles(psid).catch(() => []); if (!files.length && String(conversation || "").trim().length < 200) return res.status(400).json({ error: "материал алга (захиалагч файл илгээгээгүй эсвэл хадгалах хугацаа дууссан)" }); }
+  if (revision && PRODUCTS[product].parts) return res.status(400).json({ error: "засварыг багцын хэсэг тус бүрээр (report_dept, plan_dept, ...) илгээнэ" });
+  if (!input && psid && !revision) { const files = await M.listFiles(psid).catch(() => []); if (!files.length && String(conversation || "").trim().length < 200) return res.status(400).json({ error: "материал алга (захиалагч файл илгээгээгүй эсвэл хадгалах хугацаа дууссан)" }); }
   if (!input && !psid) return res.status(400).json({ error: "psid эсвэл input шаардлагатай" });
   if (psid && activeByPsid.has(psid)) return res.status(202).json({ job_id: activeByPsid.get(psid), status: "already_running" });
-  const id = crypto.randomUUID(), job = { id, psid, product, period, periodYear: Number((req.body || {}).periodYear) || undefined, conversation, year, input, digest, A, status: "queued", createdAt: Date.now() };
+  const id = crypto.randomUUID(), job = { id, psid, product, revision, period, periodYear: Number((req.body || {}).periodYear) || undefined, conversation, year, input, digest, A, status: "queued", createdAt: Date.now() };
   jobs.set(id, job); if (psid) activeByPsid.set(psid, id); queue.push(job);
   res.status(202).json({ job_id: id, status: "queued", product, position: queue.length });
-  if (psid && notify) fbText(psid, `Таны захиалгыг («${PRODUCTS[product].name}») боловсруулж эхэллээ ⏳ Материалын хэмжээнээс хамаарч 30–90 минут болно. Бэлэн болмогц PDF, Word, Excel файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.`).catch(() => { });
+  if (psid && notify && revision) fbText(psid, `Засварын хүсэлтийг хүлээн авлаа ⏳ «${PRODUCTS[product].name}»-ийг засаж байна, 10–30 минут болно. Бэлэн болмогц файлаар илгээнэ.`).catch(() => { });
+  else if (psid && notify) fbText(psid, `Таны захиалгыг («${PRODUCTS[product].name}») боловсруулж эхэллээ ⏳ Материалын хэмжээнээс хамаарч 30–90 минут болно. Бэлэн болмогц PDF, Word, Excel файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.`).catch(() => { });
   pump();
 });
 router.get("/org/status", auth, (req, res) => res.json({ enabled: process.env.ORG_ENABLED === "1", running, queued: queue.length, safe_to_deploy: running === 0 && queue.length === 0 }));

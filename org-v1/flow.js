@@ -8,6 +8,7 @@ const { callJSON, FAST, WRITER } = require("../plan-v2/claude");
 const { fbText } = require("../plan-v2/util");
 const { PRODUCTS, fmtMoney, priceFor } = require("./quote");
 const PER = require("./period");
+const REV = require("./revise");
 const router = express.Router();
 const GRAPH = "https://graph.facebook.com/v21.0/me/messages";
 const MKT_PRICE = Number(process.env.MKT_PRICE || 149900);
@@ -100,6 +101,70 @@ function periodLine(product, period) {
   const nx = PER.next(p, 2000);
   return k === "bundle" ? `📅 Хугацаа: ${PER.names(p).gen} тайлан + ${PER.names(nx).gen} төлөвлөгөө (он нь материалаас тогтоогдоно)` : `📅 Хугацаа: ${PER.names(p).label} (он нь материалаас тогтоогдоно)`;
 }
+// ---- Засвар ----
+const REV_DAYS = 30, REV_BTN = [["✏️ Засвар хийлгэх", "FLOW_REV"], ["Үндсэн цэс", "FLOW_MENU"]];
+const partName = (p) => (/^report/.test(p) ? "Тайлан" : "Төлөвлөгөө");
+async function revAllowed(psid) {
+  const last = await REV.getLast(psid);
+  if (!last || !last.parts || Date.now() - (last.at || 0) > REV_DAYS * 86400e3) return null;
+  return last;
+}
+// Ажил дууссаны дараа (index.js): засварын эрхийг бүртгэж, засвар хийлгэх товч илгээнэ
+async function onDone(job) {
+  const psid = job.psid; if (!psid) return;
+  let last = await REV.getLast(psid);
+  if (job.revision) {
+    if (!last || !last.allow) last = { product: job.product, parts: [job.product], allow: { [job.product]: 1 }, at: Date.now() };
+    last.allow[job.product] = Math.max(0, (last.allow[job.product] ?? 1) - 1); last.at = Date.now();
+  } else {
+    const parts = (PRODUCTS[job.product] && PRODUCTS[job.product].parts) || [job.product];
+    last = { product: job.product, parts, allow: Object.fromEntries(parts.map((x) => [x, 1])), at: Date.now() };
+  }
+  await REV.setLast(psid, last);
+  const f = (await getF(psid)) || {};
+  if (f.s === "processing") await setF(psid, { s: "done" });
+  const left = last.parts.filter((x) => last.allow[x] > 0);
+  const txt = left.length && left.length < last.parts.length ? `✏️ Дахин засвар хэрэгтэй бол доорх товчийг дарна уу. Үнэгүй засвартай: ${left.map((x) => NAMES[x]).join(", ")}. Бусад нь нэмэлт засвар (${fmtMoney(REV.REV_PRICE[last.parts.find((x) => !left.includes(x))] || 29900)}).`
+    : left.length ? `✏️ Засвар хэрэгтэй бол доорх товчийг дарна уу. ${last.parts.length > 1 ? "Баримт бүрд" : "Танд"} 1 удаа үнэгүй засвар хийх эрхтэй (${REV_DAYS} хоногийн дотор).`
+    : `✏️ Дахин засвар хэрэгтэй бол доорх товчийг дарна уу (нэмэлт засвар ${fmtMoney(REV.REV_PRICE[last.parts[0]] || 29900)}).`;
+  await send(psid, txt, REV_BTN);
+}
+async function onRevReject(job, msg) {
+  const psid = job.psid; if (!psid) return;
+  await setF(psid, { s: "done" });
+  await send(psid, `${msg}\n\nЗасварын эрх тань хасагдаагүй. Засвар хийлгэх бол доорх товчийг дараад юуг өөрчлөхөө тодорхой бичнэ үү. Жишээ нь: "3.1-р хэсэгт сургалтын ажлыг нэм", "Борлуулалтын 5-р сарын дүн 12 сая байх ёстой".`, REV_BTN);
+}
+async function revStart(psid, part) {
+  const last = await revAllowed(psid);
+  if (!last || !last.parts.includes(part)) { await setF(psid, { s: "left" }); return toMenu(psid, "Засвар хийх боломжтой захиалга олдсонгүй (засварыг хүргэснээс хойш 30 хоногийн дотор хийнэ)."); }
+  if ((last.allow[part] || 0) > 0) {
+    await setF(psid, { s: "rev_request", part, product: part });
+    await send(psid, `✏️ «${NAMES[part]}»-д ямар засвар хийлгэх вэ?\n\nНэг мессежинд дэлгэрэнгүй бичнэ үү: аль хэсгийг (жишээ нь 3.1) юу болгож өөрчлөх, ямар тоо буруу, зөв нь хэд, юу нэмэх, хасах. Засвар нь энэ баримтын хүрээнд хийгдэнэ.`, [["Цуцлах", "FLOW_CANCEL"]]);
+    return "ext";
+  }
+  const price = REV.REV_PRICE[part] || 29900, pi = payInfo();
+  await setF(psid, { s: "awaiting_payment", rev: { part }, product: part, price });
+  await send(psid, `Энэ баримтын үнэгүй засварын эрх ашиглагдсан байна.\n\n✏️ Нэмэлт засвар: ${fmtMoney(price)}\n\n${pi ? pi + "\n\n" : ""}Гүйлгээний утга дээр утасны дугаар + засвар гэж бичнэ үү. Төлбөр шилжүүлсний дараа баримтын зургийг энд илгээнэ үү. Баталгаажмагц засварын хүсэлтээ бичнэ.`, [["Цуцлах", "FLOW_CANCEL"]]);
+  if (!pi && ADMIN()) await send(ADMIN(), `⚠️ PAY_INFO тохируулаагүй — ${psid}-д дансны мэдээллийг гараар илгээнэ үү.`);
+  return "ext";
+}
+async function revMenu(psid) {
+  const last = await revAllowed(psid);
+  if (!last) { await setF(psid, { s: "left" }); return toMenu(psid, "Засвар хийх боломжтой захиалга олдсонгүй (засварыг хүргэснээс хойш 30 хоногийн дотор хийнэ)."); }
+  if (last.parts.length === 1) return revStart(psid, last.parts[0]);
+  await setF(psid, { s: "choose", menu: "revp", parts: last.parts });
+  await send(psid, `Аль баримтад засвар хийлгэх вэ?\n\n${last.parts.map((x, i) => `${i + 1}️⃣ ${NAMES[x]}${(last.allow[x] || 0) > 0 ? " (үнэгүй засвартай)" : ""}`).join("\n")}`,
+    [...last.parts.map((x, i) => [`${i + 1}. ${partName(x)}`, `FLOW_REVP_${x}`]), ["Цуцлах", "FLOW_CANCEL"]]);
+  return "ext";
+}
+async function startRevJob(psid, f, text) {
+  const base = `http://127.0.0.1:${process.env.PORT || 3000}`, headers = { "Content-Type": "application/json", "x-api-key": process.env.API_KEY || "" };
+  const r = await fetch(base + "/org/jobs", { method: "POST", headers, body: JSON.stringify({ psid, product: f.part, revision: text }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  await setF(psid, { s: "processing", job: j.job_id, jobKind: "org", product: f.part, rev: { part: f.part }, startedAt: Date.now() });
+}
+
 const NAMES = { marketing: "Маркетингийн төлөвлөгөө", report_dept: PRODUCTS.report_dept.name, report_dir: PRODUCTS.report_dir.name, plan: PRODUCTS.plan.name, bundle: PRODUCTS.bundle.name, plan_dept: PRODUCTS.plan_dept.name, bundle_dept: PRODUCTS.bundle_dept.name };
 const tiers = (p) => { const q = [5, 30, 80].map((u) => priceFor(p, u)); return `20 хүртэл хуудас: ${fmtMoney(q[0].price)} · 21–50: ${fmtMoney(q[1].price)} · 51–100: ${fmtMoney(q[2].price)}`; };
 const payInfo = () => process.env.PAY_INFO ? String(process.env.PAY_INFO).replace(/\\n/g, "\n") : null;
@@ -194,6 +259,8 @@ async function handle({ psid, text, payload, attachments }) {
     if (payload === "ORG_PLAN" || payload === "ORG_REPORT") return showMenu(psid, "group");
     if (payload.startsWith("FLOW_G_")) return showMenu(psid, payload.slice(7));
   }
+  if (payload === "FLOW_MENU") { await setF(psid, { s: "left" }); return toMenu(psid); }
+  if ((payload === "FLOW_REV" || payload.startsWith("FLOW_REVP_")) && !["processing", "payment_review"].includes(f.s)) return payload === "FLOW_REV" ? revMenu(psid) : revStart(psid, payload.slice(10));
   if (payload === "FLOW_CANCEL" || (CANCEL.test(text) && !["processing", "payment_review"].includes(f.s))) { await setF(psid, { s: "left" }); return toMenu(psid, "Цуцаллаа. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
   if (payload.startsWith("FLOW_P_") && PRODUCTS[payload.slice(7)]) return askPeriod(psid, payload.slice(7));
   if (payload.startsWith("FLOW_T_") && f.s === "choose" && f.product) return pickType(psid, f, payload.slice(7));
@@ -217,17 +284,26 @@ async function handle({ psid, text, payload, attachments }) {
         f.s = "payment_review"; f.receipt = img.payload && img.payload.url; await setF(psid, f);
         await send(psid, "Баярлалаа! Төлбөрийн баримтыг хүлээн авлаа ✅ Шалгаад баталгаажмагц боловсруулж эхэлнэ.");
         if (ADMIN()) { await sendImage(ADMIN(), f.receipt);
-          await send(ADMIN(), `💳 Төлбөрийн баримт ирлээ\nҮйлчилгээ: ${NAMES[f.product]}${PER.clean(f.period) ? ` (${PER.shortText(f.period)})` : ""}\nДүн: ${fmtMoney(f.price || 0)}${f.units ? ` (${f.units} хуудас)` : ""}\nЗахиалагч: ${psid}\n\nДанс руугаа орж шалгаад сонгоно уу.`, [["✅ Батлах", `PAYOK|${psid}`], ["❌ Татгалзах", `PAYNO|${psid}`]]); }
+          await send(ADMIN(), `💳 Төлбөрийн баримт ирлээ\nҮйлчилгээ: ${f.rev ? "✏️ Нэмэлт засвар — " : ""}${NAMES[f.product]}${PER.clean(f.period) ? ` (${PER.shortText(f.period)})` : ""}\nДүн: ${fmtMoney(f.price || 0)}${f.units ? ` (${f.units} хуудас)` : ""}\nЗахиалагч: ${psid}\n\nДанс руугаа орж шалгаад сонгоно уу.`, [["✅ Батлах", `PAYOK|${psid}`], ["❌ Татгалзах", `PAYNO|${psid}`]]); }
         return "ext";
       }
       if (atts.length) { await send(psid, "Төлбөрийн баримтыг зураг (screenshot) хэлбэрээр илгээнэ үү."); return "ext"; }
       await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. Шилжүүлсний дараа гүйлгээний баримтын зургийг энд илгээнэ үү.${payInfo() ? "\n\n" + payInfo() : ""}`, f.url ? [["Материал нэмэх", "FLOW_MORE"], ["Цуцлах", "FLOW_CANCEL"]] : [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
+    case "rev_request": {
+      if (atts.length && !text) { await send(psid, "Засварын хүсэлтээ текстээр бичнэ үү 🙏 (зураг, файлыг энэ шатанд уншихгүй).", [["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
+      if (text.length < 8) { await send(psid, "Юуг өөрчлөхөө арай дэлгэрэнгүй бичнэ үү (аль хэсэг, юу болгох).", [["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
+      try { await startRevJob(psid, f, text); }
+      catch (e) { await send(psid, "Засвар эхлүүлэхэд түр саатал гарлаа. Манай ажилтан тантай холбогдоно."); if (ADMIN()) await send(ADMIN(), `⚠️ ${psid}: засвар эхлүүлж чадсангүй — ${e.message}`); await setF(psid, { s: "done" }); }
+      return "ext";
+    }
+    case "done":
+      await setF(psid, { s: "left" }); return toMenu(psid);
     case "payment_review":
       await send(psid, "Таны төлбөрийг шалгаж байна. Баталгаажмагц мэдэгдэнэ 🙏"); return "ext";
     case "processing": {
       const st = await jobStatus(f);
-      if (st === "done" || st === "gone" || st === "failed" || st === "blocked") { await setF(psid, { s: "left" }); return toMenu(psid, st === "done" || st === "gone" ? "Таны захиалга бэлэн болж, файлууд дээр илгээгдсэн байгаа 📄 Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу." : "Танай захиалгын талаар манай ажилтан тантай холбогдоно. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
+      if (st === "done" || st === "gone" || st === "failed" || st === "blocked" || st === "revision_rejected") { await setF(psid, { s: "left" }); return toMenu(psid, st === "done" || st === "gone" ? "Таны захиалга бэлэн болж, файлууд дээр илгээгдсэн байгаа 📄 Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу." : "Танай захиалгын талаар манай ажилтан тантай холбогдоно. Өөр үйлчилгээ хэрэгтэй бол доорх товчноос сонгоно уу."); }
       await send(psid, "Таны захиалгыг боловсруулж байна ⏳ Бэлэн болмогц файлаар илгээнэ. Материалын хэмжээнээс хамаарч 30–90 минут болно."); return "ext";
     }
     case "choose": {
@@ -238,6 +314,8 @@ async function handle({ psid, text, payload, attachments }) {
       if (pick && pick.startsWith("G:")) return showMenu(psid, pick.slice(2));
       if (pick && pick.startsWith("T:") && f.product) return pickType(psid, f, pick.slice(2));
       if (pick && pick.startsWith("N:") && f.product && f.ptype) return pickN(psid, f, Number(pick.slice(2)));
+      if (f.menu === "revp" && Array.isArray(f.parts) && n && f.parts[n - 1]) return revStart(psid, f.parts[n - 1]);
+      if (f.menu === "revp") { await send(psid, "Доорх товчноос сонгоно уу.", [...f.parts.map((x, i) => [`${i + 1}. ${partName(x)}`, `FLOW_REVP_${x}`]), ["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
       if (pick && PRODUCTS[pick]) return askPeriod(psid, pick);
       if (!PICK[f.menu] || (/^per/.test(f.menu) && !f.product)) return showMenu(psid, "group");
       await send(psid, `Доорх товчноос сонгох эсвэл дугаарыг нь бичээд илгээнэ үү.`, BTN[f.menu]); return "ext"; }
@@ -254,6 +332,13 @@ async function admin(payload) {
     f.s = "awaiting_payment"; await setF(psid, f);
     await send(psid, "Уучлаарай, таны төлбөр баталгаажсангүй. Дүн, гүйлгээгээ шалгаад баримтаа дахин илгээнэ үү. Асуудал байвал манай ажилтан тантай холбогдоно.");
     await send(ADMIN(), `❌ Татгалзлаа: ${psid}`); return { ok: true };
+  }
+  if (f.rev) {
+    const last = (await REV.getLast(psid)) || { product: f.rev.part, parts: [f.rev.part], allow: {}, at: Date.now() };
+    last.allow = last.allow || {}; last.allow[f.rev.part] = (last.allow[f.rev.part] || 0) + 1; last.at = Date.now(); await REV.setLast(psid, last);
+    await setF(psid, { s: "rev_request", part: f.rev.part, product: f.rev.part });
+    await send(psid, `Нэмэлт засварын төлбөр баталгаажлаа ✅\n\nЯмар засвар хийлгэхээ нэг мессежинд дэлгэрэнгүй бичнэ үү: аль хэсэг, юу болгох, зөв тоо.`, [["Цуцлах", "FLOW_CANCEL"]]);
+    await send(ADMIN(), `✅ Нэмэлт засварын төлбөр баталгаажлаа: ${NAMES[f.rev.part]} (${psid})`); return { ok: true };
   }
   try { await startJob(psid, f); await setF(psid, f); await send(ADMIN(), `✅ Баталлаа, боловсруулж эхэллээ: ${NAMES[f.product]} (${psid})`); }
   catch (e) { await send(ADMIN(), `⚠️ ${psid}: ажил эхлүүлж чадсангүй — ${e.message}`); await send(psid, "Төлбөр баталгаажлаа ✅ Боловсруулалт эхлэхэд түр саатал гарлаа, манай ажилтан удахгүй эхлүүлнэ."); }
@@ -274,5 +359,7 @@ router.get("/flow/state/:psid", auth, async (req, res) => res.json(await getF(re
 
 module.exports = router;
 module.exports.onQuote = onQuote;
+module.exports.onDone = onDone;
+module.exports.onRevReject = onRevReject;
 module.exports.handleMessage = handle;
 module.exports.adminAction = admin;

@@ -5,7 +5,9 @@ const { planIntake, reportIntake } = require("./intake");
 const plancalc = require("./plancalc"), planfin = require("./planfin"), planxlsx = require("./planxlsx");
 const kpicalc = require("./kpicalc"), kpifin = require("./kpifin"), kpixlsx = require("./kpixlsx"), kpiplanxlsx = require("./kpiplanxlsx");
 const { research } = require("./research");
-const { writeAll, writeAllMock } = require("./chapters");
+const { writeAll, writeSome, writeAllMock } = require("./chapters");
+const REV = require("./revise");
+const revRejected = (code, msg) => { const e = new Error(msg); e.status = "revision_rejected"; e.code = code; return e; };
 const { finalize } = require("./blocks");
 const { renderAll } = require("./charts");
 const { buildDoc } = require("./document");
@@ -53,47 +55,79 @@ async function runOrg(job, log = console.log) {
   if (!OUTLINES[P]) throw new Error(`Тодорхойгүй бүтээгдэхүүн: ${P}`);
   const guard = async (text) => { const g = await checkContent(text); if (!g.allowed) { log(`[org ${job.id}] ХААВ: ${g.category} — ${g.reason}`); throw blockedError(g); } };
   if (job.conversation) await guard(job.conversation);
+  // Засвар: өмнө хүргэсэн баримтын төлөвийг ачаална (материал дахин уншихгүй)
+  let snap = null;
+  if (job.revision) {
+    await guard(job.revision);
+    snap = job.psid ? await REV.loadSnap(job.psid, P) : null;
+    if (!snap) throw revRejected("snapshot_missing", "Өмнө хүргэсэн баримтын мэдээлэл олдсонгүй (30 хоногоос өмнө хүргэсэн байж магадгүй).");
+    job.period = snap.period; job.periodYear = snap.periodYear;
+  }
 
   step("1/8 материал уншиж байна");
-  const raw = job.raw || (job.psid && !job.input ? await extractRaw(job.psid, log) : { docs: [], text: "", files: [] });
+  const raw = snap ? { docs: [], text: snap.raw || "", files: snap.files || [] } : job.raw || (job.psid && !job.input ? await extractRaw(job.psid, log) : { docs: [], text: "", files: [] });
   job.raw = raw; // багцад дараагийн хэсэг дахин уншихгүй
-  if (raw.text) await guard(raw.text.slice(0, 15000));
-  if (!job.input && !raw.docs.length && String(job.conversation || "").trim().length < 200) throw new Error("Уншиж болох материал алга (файл уншигдсангүй)");
+  if (!snap) {
+    if (raw.text) await guard(raw.text.slice(0, 15000));
+    if (!job.input && !raw.docs.length && String(job.conversation || "").trim().length < 200) throw new Error("Уншиж болох материал алга (файл уншигдсангүй)");
+  }
 
   step("2/8 мэдээлэл задлан шинжилж байна");
   const plan = P === "plan";
   // Хугацаа: жил биш (хагас жил, улирал, сар) сонгосон бол per, жил бол null — хуучин урсгал хэвээр
   const pin = PER.clean(job.period), isSub = !!(pin && pin.type !== "year");
   let per = null;
-  let A, cfg, m, digest = null, res, fin;
+  let A, cfg, m, digest = null, res, fin, rp = null;
   if (plan) {
     if (isSub) per = PER.make(pin, job.periodYear || PER.planYear(pin));
-    if (job.input) { cfg = per ? { ...job.input, year: per.year } : job.input; A = { org_name: cfg.org_name, org_type: cfg.org_type, brand: { name: cfg.org_name, slogan: "" }, missing_info: [], assumed_fields: [], ...(job.A || {}) }; }
+    if (snap) { A = snap.A; cfg = snap.cfg; }
+    else if (job.input) { cfg = per ? { ...job.input, year: per.year } : job.input; A = { org_name: cfg.org_name, org_type: cfg.org_type, brand: { name: cfg.org_name, slogan: "" }, missing_info: [], assumed_fields: [], ...(job.A || {}) }; }
     else ({ A, cfg } = await planIntake({ conversation: job.conversation, docs: raw.docs, year: per ? per.year : job.year, period: per }, log));
+  } else {
+    if (snap) { A = snap.A; m = snap.m; digest = snap.digest || {}; }
+    else if (job.input) { m = JSON.parse(JSON.stringify(job.input)); A = { org_name: m.org_name, unit_name: m.unit_name, year: m.year, brand: { name: m.org_name, slogan: "" }, missing_info: [], assumed_fields: [] }; digest = job.digest || {}; }
+    else ({ A, m, digest } = await reportIntake({ conversation: job.conversation, docs: raw.docs, product: P }, log));
+    if (isSub && P === "plan_dept") per = PER.make(pin, job.periodYear || PER.planYear(pin));
+    else if (isSub) per = PER.make(pin, Number(m.year) || PER.reportYear(pin));
+  }
+  const outline = per ? PER.adaptOutline(OUTLINES[P], per) : OUTLINES[P];
+  if (per) log(`[org ${job.id}] хугацаа: ${per.full}`);
+  if (snap) {
+    step("2/8 засварын төлөвлөгөө");
+    rp = MOCK() ? { actionable: true, inScope: true, sections: [outline.find((o) => o.group !== "static" && o.words).id], patch: job.mockPatch || null, note: "туршилт" } : await REV.plan({ request: job.revision, outline, A, m, cfg, product: P });
+    if (!rp.actionable) throw revRejected("not_actionable", "Таны мессежид ямар засвар хийхийг заагаагүй байна.");
+    if (!rp.inScope) throw revRejected("out_of_scope", "Энэ засвар өмнө хүргэсэн баримтын хүрээнээс гадуур байна (өөр байгууллага эсвэл өөр төрлийн баримт).");
+    const ap = REV.applyPatch(rp.patch, { A, m, cfg });
+    A = ap.A; m = ap.m; cfg = ap.cfg; rp.changed = ap.changed;
+    log(`[org ${job.id}] засвар: ${rp.note} | хэсгүүд: ${rp.sections.join(", ")}${rp.changed ? " | тоо өөрчлөгдсөн" : ""}`);
+  }
+  const cfg0 = plan ? JSON.parse(JSON.stringify(cfg)) : null, m0 = plan ? null : JSON.parse(JSON.stringify(m)); // засварт хадгалах (хугацаагаар тайрахаас өмнөх)
+  if (plan) {
     if (per) { cfg = plancalc.clipToPeriod(plancalc.normalizeCfg(cfg), per.months); cfg.period_gen = `${per.year} оны ${per.gen}`; cfg.period_full = per.full; }
     res = plancalc.calculate(cfg); fin = planfin.build(A, cfg, res);
   } else {
-    if (job.input) { m = JSON.parse(JSON.stringify(job.input)); A = { org_name: m.org_name, unit_name: m.unit_name, year: m.year, brand: { name: m.org_name, slogan: "" }, missing_info: [], assumed_fields: [] }; digest = job.digest || {}; }
-    else ({ A, m, digest } = await reportIntake({ conversation: job.conversation, docs: raw.docs, product: P }, log));
-    if (isSub && P === "plan_dept") per = PER.make(pin, job.periodYear || PER.planYear(pin));
-    else if (isSub) { per = PER.make(pin, Number(m.year) || PER.reportYear(pin)); m.months_covered = per.months; m.year = per.year; }
+    if (per && P !== "plan_dept") { m.months_covered = per.months; m.year = per.year; }
     res = kpicalc.calculate(m);
     if (per && P !== "plan_dept") res.period = per.full;
     fin = kpifin.build(A, m, res);
   }
-  const outline = per ? PER.adaptOutline(OUTLINES[P], per) : OUTLINES[P];
-  if (per) log(`[org ${job.id}] хугацаа: ${per.full}`);
 
   step("3/8 судалгаа");
-  let rs = null;
-  if (plan && !MOCK()) { try { rs = await research(A, res.year || cfg.year); } catch (e) { if (/credit balance/i.test(e.message || "")) throw e; log(`[org ${job.id}] судалгаа амжилтгүй: ${e.message}`); } }
+  let rs = snap ? snap.rs || null : null;
+  if (plan && !snap && !MOCK()) { try { rs = await research(A, res.year || cfg.year); } catch (e) { if (/credit balance/i.test(e.message || "")) throw e; log(`[org ${job.id}] судалгаа амжилтгүй: ${e.message}`); } }
   fin.sources = [...new Set([...(rs ? [...rs.macro, ...rs.law, ...rs.sector] : [])].map((x) => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
   fin.sources.push(...raw.files.filter((f) => f.ok).map((f) => `Байгууллагын материал: ${f.name}`), "Захиалагчийн өгсөн мэдээлэл", "Төсвийн тооцоо (кодоор тооцсон)");
 
   step("4/8 бүлгүүдийг бичиж байна");
   const ctx = { product: P, A, facts: fin.facts, digest, research: rs, conversation: job.conversation || "", raw: raw.text || "", outline, periodNote: PER.note(P, per) };
-  const written0 = MOCK() ? writeAllMock(ctx) : await writeAll(ctx, undefined, (g) => log(`[org ${job.id}]   ✓ ${g}`));
-  const fz = finalize(written0, A);
+  let written0;
+  if (snap) {
+    // Тоо өөрчлөгдсөн бол хураангуй ба тоо тайлбарласан хэсгүүдийг ч шинэчилнэ
+    const ids = [...new Set([...rp.sections, ...(rp.changed ? outline.filter((o) => o.group === "summary" || (o.attach || []).length).map((o) => o.id) : [])])];
+    const fresh = MOCK() ? Object.fromEntries(Object.entries(writeAllMock(ctx)).filter(([k]) => ids.includes(k))) : await writeSome({ ...ctx, revision: { request: job.revision, previous: snap.written || {} } }, ids, (g) => log(`[org ${job.id}]   ✓ ${g}`));
+    written0 = { ...(snap.written || {}), ...fresh };
+  } else written0 = MOCK() ? writeAllMock(ctx) : await writeAll(ctx, undefined, (g) => log(`[org ${job.id}]   ✓ ${g}`));
+  const fz = finalize(JSON.parse(JSON.stringify(written0)), A);
   dedupe(fz.written, outline, fin);
 
   step("5/8 график");
@@ -149,7 +183,8 @@ async function runOrg(job, log = console.log) {
     if (scopeNote && process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `ℹ️ Хэлтсийн тайлангийн захиалгад байгууллагын хэмжээний материал ирлээ (${A.org_name}, psid ${job.psid}). Тайланг нэг нэгжийн хүрээнд бичиж, захирлын тайланг санал болгосон.`).catch(() => { });
     const tt = (id) => { const o = outline.find((x) => x.id === id); return o ? o.t.replace(/^(\S+) /, "$1 «") + "»" : id; };
     const where = per && (pd || plan) ? `Эхлэх газар: ${pd ? tt("1.1") + " ба " + tt("3.2") : tt("1.2") + " ба " + tt("1.4")}.` : pd ? "Эхлэх газар: 1.1 «Ирэх оны гол чиглэл» ба 3.2 «Зорилт ба KPI»." : plan ? "Эхлэх газар: 1.2 «Ирэх жилийн гол чиглэл, зорилт» ба 1.4 «Эхний 30 хоногт хийх 5 ажил»." : "Эхлэх газар: 1-р бүлэг (товч дүгнэлт) ба хавсралтын «Баталгаажуулах, нөхөх зүйлс» хүснэгт.";
-    await fbText(job.psid, `✅ Таны захиалсан «${name0}» бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.${xl} Word файлыг нээхэд гарчгийн хуудасны дугаарыг шинэчлэх эсэхийг асуувал «Тийм» гэж дарна уу.
+    if (job.revision) await fbText(job.psid, `✅ Засвар хийгдлээ: «${name0}»${rp && rp.note ? `\n\n✏️ ${rp.note}` : ""}\n\nДээрх файлууд нь засварласан хувилбар. Батлуулахаас өмнө дахин уншиж шалгана уу.${xl}`);
+    else await fbText(job.psid, `✅ Таны захиалсан «${name0}» бэлэн боллоо! PDF файлыг утсан дээрээ уншихад, Word файлыг засварлахад ашиглана уу.${xl} Word файлыг нээхэд гарчгийн хуудасны дугаарыг шинэчлэх эсэхийг асуувал «Тийм» гэж дарна уу.
 
 ⚠️ Чухал сануулга: Энэ баримтыг таны илгээсэн материал${plan ? " болон нээлттэй эх сурвалжийн судалгаа" : ""}нд үндэслэн хиймэл оюун ухаан боловсруулсан. Батлуулах, хүргүүлэхээс өмнө заавал уншиж шалгана уу:
 1. Тоо, нэр, огноо материалтай таарч байгаа эсэх.
@@ -158,6 +193,10 @@ async function runOrg(job, log = console.log) {
 
 ${where}${scopeNote}${skipped}${missing}`);
   }
+  // Засварт ашиглах төлөв (30 хоног)
+  if (job.psid) await REV.saveSnap(job.psid, P, { product: P, period: PER.clean(job.period), periodYear: per ? per.year : job.periodYear, A, cfg: cfg0, m: m0, digest,
+    raw: String(raw.text || "").slice(0, Number(process.env.ORG_RAW_CTX || 80000)), files: (raw.files || []).map((f) => ({ name: f.name, ok: f.ok, note: f.note })), rs, written: written0, conversation: job.conversation || "" });
+  if (rp) job.result.revision_note = rp.note;
   if (process.env.ORG_DONE_WEBHOOK && !MOCK()) await fetch(process.env.ORG_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "done", ...job.result, qc: job.qc }), signal: AbortSignal.timeout(8000) }).catch((e) => log("[org] webhook алдаа " + e.message));
   step("дууслаа");
   return job;

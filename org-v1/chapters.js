@@ -70,7 +70,8 @@ async function writeSection(item, ctx) {
   const facts = researchFor(item, ctx.research);
   const scope = (ctx.product === "report_dept" || ctx.product === "plan_dept") && ctx.A.org_wide ? `ХАМРАХ ХҮРЭЭ: Материалд байгууллагын хэмжээний мэдээлэл (санхүүгийн тайлан, олон хэлтэс, ТУЗ-ийн шийдвэр) байгаа ч энэ бол ЗӨВХӨН «${ctx.A.unit_name || "тайлагнагч нэгж"}»-ийн ажлын ${ctx.product === "plan_dept" ? "төлөвлөгөө" : "тайлан"}. Байгууллагын санхүүгийн үр дүнг шинжлэх, ТУЗ-ийн шийдвэрийн биелэлт, бусад хэлтсийн ажлыг дүгнэх, ТУЗ-д шийдүүлэх асуудал бичихгүй; зөвхөн энэ нэгжид хамаарах баримтыг ашигла.\n\n` : "";
   const user = (ctx.periodNote || "") + scope + `${facts.length ? "СУДАЛГААНЫ БАРИМТ:\n" + JSON.stringify(facts).slice(0, 14000) + "\n\n" : ""}БИЧИХ ХЭСЭГ:\n- id "${item.id}" — ${item.t}: доод тал нь ${item.words || 100} үг. ${item.guide || ""}${item.attach ? " [Код оруулах: " + item.attach.join(", ") + "]" : ""}`;
-  const out = await callJSON({ system: styleFor(ctx.product, ctx.outline || OUTLINES[ctx.product]), cached: ctx._cached, user, maxTokens: item.maxTokens || Number(process.env.ORG_SECTION_MAX_TOKENS || 16000) });
+  const rev = ctx.revision ? `\n\nЗАСВАРЫН ХҮСЭЛТ (заавал тусга):\n${ctx.revision.request}\n\nЭНЭ ХЭСГИЙН ӨМНӨХ ХУВИЛБАР (блокууд):\n${JSON.stringify(ctx.revision.previous[item.id] || []).slice(0, 30000)}\n\nӨмнөх хувилбарыг үндэс болгож, засварын хүсэлтэд хамаарах агуулгыг шинэчил. Хүсэлтэд хамааралгүй агуулгыг хадгал. Тоог дээрх тооцооноос дахин шалгаж, зөрсөн тоог шинэчил. Хэсгийг бүтнээр нь буцаа.` : "";
+  const out = await callJSON({ system: styleFor(ctx.product, ctx.outline || OUTLINES[ctx.product]), cached: ctx._cached, user: user + rev, maxTokens: item.maxTokens || Number(process.env.ORG_SECTION_MAX_TOKENS || 16000) });
   const sec = (out.sections || []).find((s) => String(s.id) === item.id) || (out.sections || [])[0];
   return fixText(sanitize(sec && Array.isArray(sec.blocks) ? sec.blocks.filter((b) => b && b.type) : []));
 }
@@ -117,4 +118,19 @@ function writeAllMock(ctx) {
   return out;
 }
 
-module.exports = { writeAll, writeSection, writeAllMock, style: styleFor };
+// Засвар: зөвхөн заасан хэсгүүдийг дахин бичнэ (бусдыг өмнөх хувилбараар нь үлдээнэ)
+async function writeSome(ctx, ids, onProgress = () => { }) {
+  const items = (ctx.outline || OUTLINES[ctx.product]).filter((o) => ids.includes(o.id) && o.group !== "static");
+  const out = {}; let k = 0;
+  async function worker() {
+    while (k < items.length) {
+      const it = items[k++];
+      try { const b = await writeSection(it, ctx); if (b.length) out[it.id] = b; onProgress(`${it.id} засагдлаа`); }
+      catch (e) { if (/credit balance/i.test(e.message || "")) throw e; console.warn(`[org-chapters] ${it.id} засаж чадсангүй, өмнөхөөр үлдээв: ${e.message}`); }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(3, items.length) }, worker));
+  return out;
+}
+
+module.exports = { writeAll, writeSome, writeSection, writeAllMock, style: styleFor };
