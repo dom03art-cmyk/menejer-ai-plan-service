@@ -229,8 +229,7 @@ async function offerQpay(psid, f, desc, head) {
     const inv = await QP.createInvoice({ psid, amount: f.price, description: `Менежер AI: ${desc}`, kind: "flow" });
     f.qpay = { no: inv.no, amount: inv.amount, short: inv.short || null }; await setF(psid, f);
     if (inv.qrUrl) await sendImage(psid, inv.qrUrl);
-    const pi = payInfo();
-    await send(psid, `${head ? head + "\n\n" : ""}💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, боловсруулалт эхэлнэ.${pi ? `\n\nДансаар шилжүүлсэн бол гүйлгээний баримтын зургийг энд илгээнэ үү:\n${pi}` : ""}`,
+    await send(psid, `${head ? head + "\n\n" : ""}💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, боловсруулалт эхэлнэ.`,
       [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]);
     return true;
   } catch (e) {
@@ -325,7 +324,7 @@ async function handle({ psid, text, payload, attachments }) {
         return "ext";
       }
       if (atts.length) { await send(psid, "Төлбөрийн баримтыг зураг (screenshot) хэлбэрээр илгээнэ үү."); return "ext"; }
-      if (f.qpay) { await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. QPay-ээр төлөх холбоос:\n${f.qpay.short || ""}\n\nТөлсний дараа «Төлсөн, шалгах» товчийг дарна уу.${payInfo() ? "\n\nДансаар шилжүүлсэн бол баримтын зургийг энд илгээнэ үү." : ""}`, [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
+      if (f.qpay) { await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. QPay-ээр төлөх холбоос:\n${f.qpay.short || ""}\n\nТөлсний дараа «Төлсөн, шалгах» товчийг дарна уу.`, [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
       await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. Шилжүүлсний дараа гүйлгээний баримтын зургийг энд илгээнэ үү.${payInfo() ? "\n\n" + payInfo() : ""}`, f.url ? [["Материал нэмэх", "FLOW_MORE"], ["Цуцлах", "FLOW_CANCEL"]] : [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
     case "rev_request": {
@@ -432,9 +431,14 @@ router.post("/qpay/invoice", express.json(), auth, async (req, res) => {
   if (!QP.allowedFor(psid)) return res.json({ ok: false, error: "disabled" });
   try {
     const inv = await QP.createInvoice({ psid, amount, kind, description: kind === "bizrev" ? "Менежер AI: бизнес төслийн нэмэлт засвар" : "Менежер AI: бизнес төсөл" });
-    if (inv.qrUrl) await sendImage(String(psid), inv.qrUrl);
-    await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц энд мэдэгдэнэ.`);
     res.json({ ok: true, no: inv.no });
+    // Make-ийн үнийн мессеж эхэлж очих тул QR-ыг хэдэн секундийн дараа илгээнэ
+    setTimeout(async () => {
+      try {
+        if (inv.qrUrl) await sendImage(String(psid), inv.qrUrl);
+        await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, энд мэдэгдэнэ.`);
+      } catch (e) { console.warn("[qpay] biz QR илгээх:", e.message); }
+    }, Number(process.env.QPAY_BIZ_DELAY_MS || 4000));
   } catch (e) { console.warn("[qpay] biz нэхэмжлэх:", e.message); res.json({ ok: false, error: String(e.message).slice(0, 200) }); }
 });
 
