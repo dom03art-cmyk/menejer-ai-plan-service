@@ -40,7 +40,7 @@ function directUrl(url) {
   return { url };
 }
 
-async function extract({ url, type, name }) {
+async function extract({ url, type, name, psid }) {
   const d = directUrl(url);
   const r = await fetch(d.url, { signal: AbortSignal.timeout(60000), redirect: "follow" });
   if (!r.ok) throw new Error(`Файл татаж чадсангүй (${r.status}). Холбоос нээлттэй (Anyone with the link) эсэхийг шалгана уу.`);
@@ -49,7 +49,7 @@ async function extract({ url, type, name }) {
   if (/text\/html/.test(mime) && /google/.test(d.url)) throw new Error("Google Drive файл хаалттай байна. Хуваалцах тохиргоог «Anyone with the link» болгоно уу.");
   const cd = r.headers.get("content-disposition") || "";
   const fname = (cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)/i) || [])[1] || d.name || name || url.split("?")[0];
-  return extractBuffer({ buf, mime, name: decodeURIComponent(fname), type });
+  return extractBuffer({ buf, mime, name: decodeURIComponent(fname), type, psid });
 }
 
 // Claude API-ийн хязгаар: зураг 5MB (base64 биш, түүхий), PDF 100 хуудас / 32MB хүсэлт
@@ -95,7 +95,7 @@ function friendly(e, k) {
   return m || "Файл уншиж чадсангүй";
 }
 
-async function extractBuffer({ buf, mime, name, type }) {
+async function extractBuffer({ buf, mime, name, type, psid }) {
   if (buf.length > MAX) throw new Error(`Файл хэт том (${mb(buf.length)}MB, 20MB хүртэл). Чухал хуудсуудын зургийг илгээнэ үү.`);
   if (type === "video" || type === "audio") throw coded("media", MEDIA_MSG);
   let k = type === "image" ? "image" : kind(mime, name);
@@ -107,7 +107,7 @@ async function extractBuffer({ buf, mime, name, type }) {
   if (k === "image") {
     if (buf.length > IMG_MAX) throw new Error(`Зураг хэт том байна (${mb(buf.length)}MB). Зургаа энэ чат руу шууд илгээнэ үү, Messenger өөрөө жижигрүүлнэ.`);
     const mt = sniff || (/png/.test(mime) ? "image/png" : /webp/.test(mime) ? "image/webp" : /gif/.test(mime) ? "image/gif" : "image/jpeg");
-    content = [{ type: "image", source: { type: "base64", media_type: mt, data: buf.toString("base64") } }, { type: "text", text: "Эхлээд шийд: энэ зурагт бизнес төсөлд хэрэгтэй УНШИГДАХ бичиг, тоо байна уу (баримт бичиг, хүснэгт, үнийн санал, нэхэмжлэх, гэрээ, тайлан, дэлгэцийн зураг, бүтээгдэхүүний шошго, үнийн самбар, тоног төхөөрөмжийн хүчин чадлын шошго)? Байхгүй бол (зөвхөн үйл явц, бүтээгдэхүүн, байр, тоног төхөөрөмж, хүмүүсийн зураг) өөр юу ч бичилгүй яг PHOTO_ONLY гэж хариул. Байвал зөвхөн уншигдах бичиг, тоог гарга." }];
+    content = [{ type: "image", source: { type: "base64", media_type: mt, data: buf.toString("base64") } }, { type: "text", text: "Эхлээд шийд: энэ зурагт бизнес төсөлд хэрэгтэй УНШИГДАХ бичиг, тоо байна уу (баримт бичиг, хүснэгт, үнийн санал, нэхэмжлэх, гэрээ, тайлан, дэлгэцийн зураг, бүтээгдэхүүний шошго, үнийн самбар, тоног төхөөрөмжийн хүчин чадлын шошго)? Байхгүй бол (зөвхөн үйл явц, бүтээгдэхүүн, байр, тоног төхөөрөмж, хүмүүсийн зураг) өөр юу ч бичилгүй яг ингэж нэг мөрөөр хариул: PHOTO_ONLY|<бүлэг>|<тайлбар>. Бүлэг: 2.4 (бүтээгдэхүүн, үйлчилгээ, бараа), 3.1 (үйлдвэрлэл, үйл явц, байр, талбай, тоног төхөөрөмж, машин) эсвэл 3.4 (баг, хамт олон, ажилчид). Тайлбар: зурагт юу байгааг монголоор 3–8 үгээр (жишээ нь «Үйлдвэрийн байрны дотор тал»). Хүний нэр, хувийн мэдээлэл бүү бич. Байвал зөвхөн уншигдах бичиг, тоог гарга." }];
   } else if (k === "pdf") {
     const t = await trimPdf(buf);
     if (t.trimmed) note = `(PDF ${t.pages} хуудастай, эхний ${PDF_PAGES} хуудсыг уншив) `;
@@ -123,7 +123,17 @@ async function extractBuffer({ buf, mime, name, type }) {
   let summary;
   try { summary = await call({ system: SYSTEM, user: content, model: WRITER, maxTokens: 3000 }); }
   catch (e) { console.warn("[files] claude:", k, mb(buf.length) + "MB", e.message); throw new Error(friendly(e, k)); }
-  if (k === "image" && /^\s*PHOTO_ONLY/.test(String(summary))) throw coded("photo", PHOTO_MSG);
+  if (k === "image" && /^\s*PHOTO_ONLY/.test(String(summary))) {
+    // Зургийг хадгалж, бизнес төслийн тохирох бүлэгт оруулна
+    const [, sec, cap] = String(summary).trim().split("\n")[0].split("|").map((x) => (x || "").trim());
+    if (psid) {
+      const r = require("./photos").save(psid, buf, { caption: cap || "Зураг", section: sec, name });
+      if (r.ok) return { kind: "photo", summary: `Захиалагчийн зураг: ${cap || "зураг"} — бизнес төслийн ${require("./photos").SECTIONS[sec] ? sec : "3.1"}-р хэсэгт хавсаргана (тооцоонд хамаарахгүй).` };
+      console.warn("[files] зураг хадгалсангүй:", r.reason);
+      if (r.reason && /олон/.test(r.reason)) throw coded("photo", `Зургийн тоо хязгаарт хүрсэн тул энэ зургийг төсөлд оруулаагүй. Төсөл гарсны дараа Word файлдаа өөрөө оруулна уу.`);
+    }
+    throw coded("photo", PHOTO_MSG);
+  }
   return { kind: k, summary: (note + String(summary).trim()).slice(0, 3000) };
 }
 
@@ -142,7 +152,8 @@ router.post("/files/extract", express.json({ limit: "1mb" }), auth, async (req, 
     req.body.url = req.body.urls; req.body.type = req.body.types;
   }
   if (Array.isArray(list) && list.length) {
-    const items = list.map(a => ({ url: (a.payload && a.payload.url) || a.url, type: a.type })).filter(a => a.url).slice(0, 10);
+    const psid = req.body && req.body.psid ? String(req.body.psid) : null;
+    const items = list.map(a => ({ url: (a.payload && a.payload.url) || a.url, type: a.type, psid })).filter(a => a.url).slice(0, 10);
     const parts = [], kinds = [], errors = [];
     // Зэрэг уншина (5 хүртэл нэг дор) — 5 зураг ~2 минутаас ~30 секунд болно
     const results = new Array(items.length);

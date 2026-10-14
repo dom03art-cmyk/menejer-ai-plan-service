@@ -159,22 +159,28 @@ async function runPipeline(job, log = console.log) {
   const theme = pickTheme(A, job.conversation);
   log(`[${job.id}] өнгөний загвар: ${theme.name}`);
   let charts, doc, text = null, nPages = null;
+  // Захиалагчийн зураг: тохирох бүлэгт нэмж оруулна (snapshot-д хадгалахгүй — зураг диск дээр байна)
+  let photoById = {};
+  try { if (job.psid) photoById = require("./photos").load(job.psid); } catch (e) { log(`[${job.id}] зураг ачаалж чадсангүй: ${e.message}`); }
+  const nPhotos = Object.values(photoById).reduce((a, l) => a + l.length, 0);
+  if (nPhotos) log(`[${job.id}] захиалагчийн ${nPhotos} зураг оруулна`);
+  const writtenDoc = require("./photos").withPhotos(written, photoById);
   const render = async () => {
     setDocTheme(theme); setPdfTheme(theme); require("./charts").setTheme(theme);
     charts = await renderAll({ ...fin.charts, ...llmSpecs });
     step("6/7 Word угсарч байна");
-    doc = await buildDoc({ A, written, fin, charts, pages: [] });
+    doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: [] });
     if (hasSoffice()) {
       const fp = findPages(doc.buffer, doc.heads);
-      doc = await buildDoc({ A, written, fin, charts, pages: fp.pages });
+      doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: fp.pages });
       text = fp.allText; nPages = fp.nPages;
     } else {
-      doc = await buildDoc({ A, written, fin, charts, pages: null }); // Word "Update Field" гарчиг
+      doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: null }); // Word "Update Field" гарчиг
     }
     job.qc = qc({ an, text, heads: doc.heads, written });
     // Утсан дээр уншихад зориулсан PDF (гарчиг бодит хуудасны дугаартай)
     try {
-      const pdf = await buildPdf({ A, written, fin, charts });
+      const pdf = await buildPdf({ A, written: writtenDoc, fin, charts });
       job.pdf = pdf.buffer;
       nPages = nPages || (pdf.buffer.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
     } catch (e) { log(`[${job.id}] PDF үүсгэж чадсангүй: ${e.message}`); job.qc.push("PDF үүсгэж чадсангүй"); }

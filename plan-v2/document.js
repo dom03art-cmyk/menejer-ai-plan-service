@@ -50,6 +50,14 @@ function renderBlocks(blocks, ctx) {
         ctx.tableNo++;
         out.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 120, after: 60 }, children: [new TextRun({ text: `Хүснэгт ${ctx.tableNo}. ${b.caption || ""}`, bold: true, size: 20, color: NAVY })] }));
         out.push(table(b), new Paragraph({ spacing: { after: 160 }, children: [] })); break;
+      case "photo": {
+        if (!b.buf || !b.w || !b.h) break;
+        const sc = Math.min(420 / b.w, 360 / b.h, 1.5), w = Math.round(b.w * sc), h = Math.round(b.h * sc);
+        ctx.figNo = (ctx.figNo || 0) + 1;
+        try { out.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 160, after: 40 }, children: [new ImageRun({ type: b.fmt === "png" ? "png" : "jpg", data: b.buf, transformation: { width: w, height: h } })] })); } catch (_) { break; }
+        out.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 160 }, children: [new TextRun({ text: `Зураг ${ctx.figNo}. ${b.caption || ""}`, size: 20, italics: true, color: GREY })] }));
+        break;
+      }
       case "chart": {
         const c = ctx.charts[b.key]; if (!c) break;
         const w = 520, h = Math.round(w * c.height / c.width);

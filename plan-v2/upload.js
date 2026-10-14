@@ -20,7 +20,8 @@ function verify(token) {
 }
 const received = new Map(); // psid -> [нэрс] (сүүлийн илгээлтийн баталгаанд)
 const failed = new Map();   // psid -> [{ name, message }] (уншиж чадаагүй файлууд)
-const photosOf = new Map(); // psid -> [нэрс] (баримт бичиг биш зураг)
+const photosOf = new Map(); // psid -> [нэрс] (баримт бичиг биш, хадгалж чадаагүй зураг)
+const savedPics = new Map(); // psid -> [нэрс] (төсөлд хавсаргах зураг)
 
 router.post("/upload-link", express.json(), (req, res) => {
   if (req.get("x-api-key") !== process.env.API_KEY) return res.status(401).json({ error: "unauthorized" });
@@ -63,12 +64,13 @@ router.post("/u/:token/file", express.json({ limit: "30mb" }), async (req, res) 
   const { name, type, data } = req.body || {};
   try {
     const buf = Buffer.from(String(data || ""), "base64");
-    const out = await extractBuffer({ buf, mime: type || "", name: name || "file", type: /^image\//.test(type || "") ? "image" : undefined });
+    const out = await extractBuffer({ buf, mime: type || "", name: name || "file", type: /^image\//.test(type || "") ? "image" : undefined, psid });
     if (process.env.MAKE_FILE_WEBHOOK) {
       await fetch(process.env.MAKE_FILE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ psid, name, kind: out.kind, summary: out.summary }), signal: AbortSignal.timeout(15000) });
     }
-    const list = received.get(psid) || []; list.push(name); received.set(psid, list);
+    if (out.kind === "photo") { const sv = savedPics.get(psid) || []; sv.push(name || "зураг"); savedPics.set(psid, sv); }
+    else { const list = received.get(psid) || []; list.push(name); received.set(psid, list); }
     res.json({ ok: true, kind: out.kind });
   } catch (e) {
     console.warn("[upload]", name, e.message);
@@ -88,15 +90,17 @@ router.post("/u/:token/done", express.json(), async (req, res) => {
   const list = received.get(psid) || []; received.delete(psid);
   const bad = failed.get(psid) || []; failed.delete(psid);
   const pics = photosOf.get(psid) || []; photosOf.delete(psid);
+  const saved = savedPics.get(psid) || []; savedPics.delete(psid);
   const parts = [];
   if (list.length) parts.push(`📎 ${list.length} файл хүлээн авч уншлаа ✅\n${list.map((n, i) => `${i + 1}. ${n}`).join("\n")}`);
   if (bad.length) parts.push(`⚠️ ${bad.length} файл уншигдсангүй:\n${bad.map((f, i) => `${i + 1}. ${f.name} — ${f.message}`).join("\n")}\n\nЗургаа энэ чат руу шууд (зургийн товчоор) илгээнэ үү. Том PDF бол чухал хуудсуудынх нь зургийг (screenshot) илгээж болно.`);
+  if (saved.length) parts.push(`🖼 ${saved.length} зураг хүлээн авлаа ✅ Бизнес төслийн тохирох бүлэгт (бүтээгдэхүүн, үйл ажиллагаа, баг) тайлбартай нь оруулна.`);
   if (pics.length) parts.push(`🖼 ${pics.length} зураг баримт бичиг биш (үйл явц, бүтээгдэхүүний зураг) тул тооцоонд оруулаагүй:\n${pics.map((n, i) => `${i + 1}. ${n}`).join("\n")}\n\nТөсөл гарсны дараа эдгээр зургийг Word файлын 2.4 (бүтээгдэхүүн) эсвэл 3.1 (үйл ажиллагаа) хэсэгт өөрөө оруулна уу. Банк бодит зургийг сайн хүлээж авдаг.`);
   if (parts.length) {
-    parts.push(list.length || !bad.length ? "Нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү. Уншсан файлуудын агуулгыг төсөлд тусгана." : "Файлаа дахин илгээсний дараа нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү.");
+    parts.push(list.length || saved.length || !bad.length ? "Нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү. Уншсан файлуудын агуулгыг төсөлд тусгана." : "Файлаа дахин илгээсний дараа нэмэлт мэдээллээ бичих эсвэл «дууслаа» гэж бичнэ үү.");
     await fbText(psid, parts.join("\n\n")).catch(() => { });
   }
-  res.json({ ok: true, count: list.length, failed: bad.length, photos: pics.length });
+  res.json({ ok: true, count: list.length, failed: bad.length, photos: pics.length, saved: saved.length });
 });
 
 const PAGE = `<!doctype html><html lang="mn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
