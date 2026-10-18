@@ -2,6 +2,7 @@
 const { f, m1, pc, payroll } = require("./fmt");
 const { productUnit } = require("./model");
 const { decisionPoints } = require("./extras");
+const funnel = require("./funnel");
 const yrH = ["1-р жил", "2-р жил", "3-р жил", "4-р жил", "5-р жил"];
 const T = (caption, headers, rows, left) => ({ type: "table", caption, headers, rows, left });
 
@@ -67,6 +68,18 @@ function build(an) {
     [...R.months.slice(0, 12).map(m => [m.label, ...P.map(p => m.units[p.key] < 20 ? m.units[p.key].toFixed(1) : f(m.units[p.key])), f(m.rev)]),
       ["!Нийт", ...P.map(p => f(Y[0].units[p.key])), f(Y[0].rev)]])];
   X.salesYearly = [T("5 жилийн борлуулалт", ["Үзүүлэлт", ...yrH], [...P.map(p => [`${p.name} (${p.unit})`, ...Y.map(y => f(y.units[p.key]))]), ...P.map(p => [`${p.name} (сая ₮)`, ...Y.map(y => m1(y.rev_p[p.key]))]), row("!Нийт орлого (сая ₮)", y => y.rev)])];
+  // Борлуулалтын юүлүүрийн тулгалт — зөвхөн захиалагч тоо хэлсэн үед; тооцоог өөрчлөхгүй
+  const grossY1 = P.reduce((a, p) => a + (p.u.net > 0 ? Y[0].rev_p[p.key] * p.price / p.u.net : 0), 0);
+  const FN = funnel.analyze(A.funnel, grossY1);
+  X.funnelTable = FN ? [T("Борлуулалтын юүлүүрийн тулгалт (1-р жил)", ["Үзүүлэлт", "Утга", "Эх сурвалж"], [
+    ["Төлөвлөсөн орлого (НӨАТ-тэй)", `${f(FN.planned_revenue_y1)} ₮`, "Тооцоо"],
+    ...(FN.avg_ticket ? [["Дундаж нэг худалдан авалт", `${f(FN.avg_ticket)} ₮`, "Захиалагч"]] : []),
+    ...(FN.purchases_needed_y1 ? [["Шаардлагатай худалдан авалт (жилд)", f(FN.purchases_needed_y1), "Тооцоо"], ["Шаардлагатай худалдан авалт (сард дунджаар)", f(FN.purchases_needed_monthly), "Тооцоо"]] : []),
+    ...(FN.conv_rate ? [["Хандсанаас худалдан авах хувь", pc(FN.conv_rate), "Захиалагч"]] : []),
+    ...(FN.contacts_needed_y1 ? [["Шаардлагатай хандалт (жилд)", f(FN.contacts_needed_y1), "Тооцоо"], ["Шаардлагатай хандалт (сард дунджаар)", f(FN.contacts_needed_monthly), "Тооцоо"]] : []),
+    ...(FN.monthly_contacts ? [["Одоогийн хандалт (сард)", f(FN.monthly_contacts), "Захиалагч"]] : []),
+    ...(FN.funnel_revenue_y1 ? [["Одоогийн хандалтаар тооцсон орлого", `${f(FN.funnel_revenue_y1)} ₮`, "Тооцоо"]] : []),
+  ], [2]), { type: "note", text: `${FN.verdict} Томьёо: орлого = хандалт × худалдан авах хувь × дундаж худалдан авалт. Энэ хүснэгт санхүүгийн тооцоог өөрчлөхгүй, зөвхөн шалгалт.` }] : [];
   const S = an.scen, SK = ["Реалистик", "Консерватив", "Пессимистик"];
   X.scenarioTable = [T("Гурван хувилбарын харьцуулалт", ["Үзүүлэлт", "Реалистик", "Консерватив (−15%)", "Пессимистик (−30%)"], [
     ["1-р жилийн орлого (сая ₮)", ...SK.map(k => m1(S[k].rev[0]))], ["3-р жилийн орлого (сая ₮)", ...SK.map(k => m1(S[k].rev[2]))],
@@ -152,6 +165,7 @@ function build(an) {
     taxes_by_year: Y.map((y, i) => ({ year: i + 1, income_tax: Math.round(y.tax || 0), social_insurance_employer: Math.round((A.staff || []).filter(s => (s.from_year || 1) <= i + 1).reduce((s, x) => s + x.count * x.gross * 12, 0) * (A.shi_rate || 0.125)) })),
     assumed_fields: A.assumed_fields || [], missing_info: A.missing_info || [],
     excluded_sections: A.exclude || [], target_requests: A.target_requests || [],
+    funnel: FN, // захиалагчийн хэлсэн хандалтын тулгалт (null бол дурдахгүй)
     decision_points: decisionPoints(an), // 3.6-р хэсгийн үе шат, шийдвэрийн цэг (тоог код тооцсон)
   };
   return { blocks: X, charts: C, facts };

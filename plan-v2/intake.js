@@ -26,6 +26,7 @@ const SCHEMA = `{
  "staff": [{"title","count","gross" (сарын үндсэн цалин),"from_year"}],
  "fixed_monthly": {"зардлын нэр": сарын дүн ₮},
  "mkt_rate": маркетинг орлогын хувь (0.05-0.10),
+ "funnel": ЗӨВХӨН захиалагч өөрөө хэлсэн үед: {"monthly_contacts": сард хандаж буй хүний тоо (мессеж, залгалт, ирц), "conv_rate": хандсанаас худалдан авдаг хувь (0-1), "avg_ticket": дундаж нэг худалдан авалтын дүн ₮}. Хэлээгүй талбарыг БҮҮ зохио, огт хэлээгүй бол энэ талбарыг бичихгүй,
  "assumed_fields": ["захиалагч хэлээгүй, чи таамагласан талбарууд"],
  "missing_info": ["банкинд заавал хэрэгтэй боловч дутуу мэдээлэл (регистр, барьцаа г.м.)"],
  "contingency_rate": ЗӨВХӨН захиалагч нөөц төсвийн (гэнэтийн зардлын) хувийг ТОДОРХОЙ хэлсэн үед: "нөөц төсөвгүй", "10%-ийг хас" → 0, "5%" → 0.05. Хэлээгүй бол энэ талбарыг БҮҮ бич,
@@ -72,6 +73,7 @@ function normalize(A) {
   if (!isFinite(out.contingency_rate)) out.contingency_rate = DEFAULT_CONTINGENCY;
   out.exclude = Array.isArray(out.exclude) ? out.exclude.filter(x => typeof x === "string") : [];
   out.target_requests = Array.isArray(out.target_requests) ? out.target_requests.filter(x => typeof x === "string" && x.trim()).slice(0, 5) : [];
+  out.funnel = require("./funnel").clean(out.funnel);
   out.tax_regime = out.tax_regime === "legacy" ? "legacy" : "auto";
   out.start_year = out.start_year || 2026;
   out.start_month_index = out.start_month_index ?? new Date().getMonth() + 1;
