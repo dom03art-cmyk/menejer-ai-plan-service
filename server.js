@@ -114,6 +114,7 @@ app.post("/debug/parse-text", (req, res) => {
 app.use(require("./plan-v2"));
 try { app.use(require("./marketing-v1")); } catch (e) { console.error("[marketing-v1] ачаалж чадсангүй:", e.message); }
 try { app.use(require("./org-v1")); } catch (e) { console.error("[org-v1] ачаалж чадсангүй:", e.message); }
+try { app.use(require("./tender-v1")); } catch (e) { console.error("[tender-v1] ачаалж чадсангүй:", e.message); }
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

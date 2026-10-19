@@ -46,6 +46,8 @@ async function sendImage(psid, url) {
   await fetch(`${GRAPH}?access_token=${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url, is_reusable: false } } } }) }).catch(() => { });
 }
 const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]];
+// tender-v1: TENDER_ENABLED=1 үед л цэсэнд «Тендерийн материал» нэмэгдэнэ
+const menuBtns = () => (process.env.TENDER_ENABLED === "1" ? [...MENU, ["Тендерийн материал", "TENDER"]] : MENU);
 // Тайлан, төлөвлөгөөний цэс 2 алхамтай: эхлээд хэлтэс/байгууллага, дараа нь тайлан/төлөвлөгөө/багц
 const GROUP_BTN = [["1. Хэлтэс", "FLOW_G_dept"], ["2. Байгууллага", "FLOW_G_org"], ["Цуцлах", "FLOW_CANCEL"]];
 const DEPT_BTN = [["1. Тайлан", "FLOW_P_report_dept"], ["2. Төлөвлөгөө", "FLOW_P_plan_dept"], ["3. Багц", "FLOW_P_bundle_dept"], ["Цуцлах", "FLOW_CANCEL"]];
@@ -61,7 +63,7 @@ const PICK = { group: ["G:dept", "G:org"], dept: ["report_dept", "plan_dept", "b
   per: ["T:year", "T:half", "T:quarter", "T:month"], per_half: ["N:1", "N:2"], per_quarter: ["N:1", "N:2", "N:3", "N:4"], per_month: Array.from({ length: 12 }, (_, i) => `N:${i + 1}`) };
 const BTN = { group: GROUP_BTN, dept: DEPT_BTN, org: ORG_BTN, per: PER_BTN, per_half: SUB_BTN.half, per_quarter: SUB_BTN.quarter, per_month: SUB_BTN.month };
 const NUMHINT = "Товч дарах эсвэл дугаарыг нь (1, 2, 3) бичээд илгээж болно.";
-const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, `${text}\n\n👉 Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.`, MENU); return "selecting_type"; };
+const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, `${text}\n\n👉 Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.`, menuBtns()); return "selecting_type"; };
 
 const from = (p) => fmtMoney(priceFor(p, 5).price);
 async function showMenu(psid, menu) {
@@ -321,6 +323,8 @@ async function handle({ psid, text, payload, attachments }) {
   text = String(text || "").trim(); payload = String(payload || "");
   const atts = Array.isArray(attachments) ? attachments.filter((a) => a && !(a.payload && a.payload.sticker_id)) : [];
   let f = (await getF(psid)) || { s: "new" };
+  // tender-v1: тендерийн урсгалын мессежийг тэр модуль хариуцна (алдаа гарвал энэ урсгал хэвээр үргэлжилнэ)
+  try { const TN = require("../tender-v1/flow"); if (await TN.claims(psid, payload)) return await TN.handle({ psid, text, payload, attachments }); } catch (e) { console.warn("[flow] tender:", e.message); }
 
   // Үндсэн цэсний сонголтууд (аль ч төлөвөөс, боловсруулж байгаагаас бусад)
   if (payload === "BIZ_PROJECT") { if (f.s === "processing") return "ext"; await setF(psid, { s: "left" }); await send(psid, "Бизнес төсөл сонголоо. Үргэлжлүүлэхийн тулд доорх товчийг дахин дарна уу.", [["Бизнес төсөл", "BIZ_PROJECT"]]); return "selecting_type"; }
@@ -405,6 +409,7 @@ async function handle({ psid, text, payload, attachments }) {
 }
 
 async function admin(payload) {
+  try { const TN = require("../tender-v1/flow"); if (TN.isAdminPayload(payload)) return await TN.adminAction(payload); } catch (e) { console.warn("[flow] tender admin:", e.message); }
   const m = String(payload || "").match(/^(PAYOK|PAYNO)\|(.+)$/); if (!m) return { ok: false };
   const [, act, psid] = m, f = await getF(psid);
   if (!f || f.s !== "payment_review") { await send(ADMIN(), `ℹ️ ${psid}: энэ захиалга төлбөр хүлээж буй төлөвт алга (${f ? f.s : "мэдээлэлгүй"}).`); return { ok: false }; }
