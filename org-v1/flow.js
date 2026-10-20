@@ -324,7 +324,7 @@ async function handle({ psid, text, payload, attachments }) {
   const atts = Array.isArray(attachments) ? attachments.filter((a) => a && !(a.payload && a.payload.sticker_id)) : [];
   let f = (await getF(psid)) || { s: "new" };
   // tender-v1: тендерийн урсгалын мессежийг тэр модуль хариуцна (алдаа гарвал энэ урсгал хэвээр үргэлжилнэ)
-  try { const TN = require("../tender-v1/flow"); if (await TN.claims(psid, payload)) return await TN.handle({ psid, text, payload, attachments }); } catch (e) { console.warn("[flow] tender:", e.message); }
+  try { const TN = require("../tender-v1/flow"); if (await TN.claims(psid, payload, text)) return await TN.handle({ psid, text, payload, attachments }); } catch (e) { console.warn("[flow] tender:", e.message); }
 
   // Үндсэн цэсний сонголтууд (аль ч төлөвөөс, боловсруулж байгаагаас бусад)
   if (payload === "BIZ_PROJECT") { if (f.s === "processing") return "ext"; await setF(psid, { s: "left" }); await send(psid, "Бизнес төсөл сонголоо. Үргэлжлүүлэхийн тулд доорх товчийг дахин дарна уу.", [["Бизнес төсөл", "BIZ_PROJECT"]]); return "selecting_type"; }

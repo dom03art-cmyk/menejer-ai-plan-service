@@ -26,8 +26,13 @@ function allowed(psid) {
 const enabled = () => process.env.TENDER_ENABLED === "1";
 
 // Энэ мессежийг тендерийн урсгал хүлээж авах уу
-async function claims(psid, payload) {
+async function claims(psid, payload, text) {
   payload = String(payload || "");
+  // Туршилт: зөвшөөрөгдсөн psid «тендер» гэж бичвэл эхэлнэ (Make-д товч нэмэхээс өмнө)
+  if (!payload && /^\s*тендер\s*$/i.test(String(text || "")) && process.env.TENDER_ALLOW_PSIDS && allowed(psid)) {
+    const cur = await S.getState(psid).catch(() => null);
+    if (!cur || !cur.s || cur.s === "tnd_left" || cur.s === "tnd_done") return true;
+  }
   if (payload === "TENDER" || payload.startsWith("TND_")) return enabled() || allowed(psid) && !!process.env.TENDER_ALLOW_PSIDS;
   const st = await S.getState(psid).catch(() => null);
   if (!st || !st.s || !st.s.startsWith("tnd_") || st.s === "tnd_left") return false;
@@ -142,6 +147,7 @@ async function handle({ psid, text, payload, attachments }) {
   const atts = Array.isArray(attachments) ? attachments.filter((a) => a && !(a.payload && a.payload.sticker_id)) : [];
   let st = (await S.getState(psid)) || { s: "new" };
 
+  if (!payload && /^\s*тендер\s*$/i.test(text) && (!st.s || st.s === "new" || st.s === "tnd_left" || st.s === "tnd_done")) payload = "TENDER";
   if (payload === "TENDER") { if (BUSY.has(st.s)) { await send(psid, "Таны тендерийн захиалгыг боловсруулж байна ⏳ Бэлэн болмогц мэдэгдэнэ."); return "ext"; } return start(psid); }
   if (payload === "TND_CANCEL" || (CANCEL.test(text) && !BUSY.has(st.s) && !["tnd_interview", "tnd_done"].includes(st.s))) {
     if (st.qpay && st.qpay.no && st.s === "tnd_pay") await require("../org-v1/qpay").cancelInvoice(st.qpay.no).catch(() => { });
