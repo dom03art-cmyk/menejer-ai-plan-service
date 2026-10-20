@@ -20,6 +20,7 @@ function respond(task, user) {
       meta: { type: d.meta.type, standard_version: d.meta.standard_version, source_files: d.meta.source_files }, tender, unreadable: [],
       brief: `«${tender.name}»\nЗахиалагч: ${tender.procuring_entity}\nТөсөвт өртөг: ${tender.budget}₮\nЭцсийн хугацаа: ${tender.deadline}` };
   }
+  if (task === "A1X") return { items: [], tech_specs: [], requirements: [{ id: "R101", category: "other", text: "Урт ТББ-ийн 2-р хэсгийн нэмэлт шаардлага", ref: "ТТ 9", evidence: "—" }], forms: [], numeric_criteria: [], inconsistencies: [], contract: {} };
   if (task === "A2") return { known: ["Компанийн нэр: " + d.customer.company.name], questions: ["1. Гарын үсэг зурах хүний нэр, албан тушаал?", "2. 2024, 2025 оны борлуулалтын орлого?", "3. Санал болгох үнэ ба доод үнэ?"], docs: ["Улсын бүртгэлийн гэрчилгээ", "Санхүүгийн тайлан 2024, 2025"], critical: ["signatory", "metrics", "prices", "floor_price"], warning: "" };
   if (task === "GAP") return /доод үнэ|floor/i.test(String(user).split("\n").filter((l) => l.startsWith("Оролцогч:")).join("\n")) ? { missing: [], ready: true } : { missing: ["Доод үнэ (үнийн санал дуудах ажиллагаанд)"], ready: false };
   if (task === "B1") {

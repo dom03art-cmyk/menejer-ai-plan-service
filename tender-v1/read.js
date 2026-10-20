@@ -3,8 +3,7 @@
 const S = require("./store");
 const { fileText, tidy } = require("../org-v1/rawtext");
 
-const FILE_CAP = Number(process.env.TENDER_FILE_CAP || 220000); // нэг файлд (ТББ 60–100 хуудас багтана)
-const TOTAL_CAP = Number(process.env.TENDER_TOTAL_CAP || 450000);
+const FILE_CAP = Number(process.env.TENDER_FILE_CAP || 1200000); // нэг файлд (300 хуудас багтана; уртыг context.js хэсэглэнэ)
 
 // → { docs:[{id, name, phase, text}], files:[{name, ok, note}] }
 async function readAll(psid, { phase, log = console.log, mock } = {}) {
@@ -32,8 +31,7 @@ async function readAll(psid, { phase, log = console.log, mock } = {}) {
       log(`[tender-read] ${f.name}: алгаслаа — ${e.message}`);
     }
   }
-  const total = docs.reduce((s, d) => s + d.text.length, 0);
-  if (total > TOTAL_CAP) for (const d of docs) { const n = Math.max(4000, Math.floor(TOTAL_CAP * d.text.length / total)); if (d.text.length > n) d.text = d.text.slice(0, n) + "\n…(тайрсан)"; }
+  // Хэмжээг context.js хянана (стандарт хэсэг хасах, цонх)
   return { docs, files };
 }
 

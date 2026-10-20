@@ -7,7 +7,8 @@
 const S = require("./store");
 const { send, sendImage, admin, fmtMoney } = require("./msg");
 
-const PRICE = () => Number(process.env.TENDER_PRICE || 149900);
+const PR = require("./pricing");
+const PRICE = () => PR.tiers()[0].price; // хамгийн бага шат (мэдээллийн зорилгоор)
 const MAX_RUNS = () => Number(process.env.TENDER_MAX_RUNS || 4);   // B шатыг нэг захиалгад хамгийн ихдээ
 const RERUN_DAYS = 14;
 const BASE = () => process.env.PUBLIC_URL || "https://menejer-ai-plan-service.onrender.com";
@@ -50,7 +51,10 @@ async function start(psid) {
   await S.clear(psid).catch(() => { });
   const url = uploadUrl(psid);
   await S.setState(psid, { s: "tnd_upload", url, conv: [] });
-  await send(psid, `📑 Тендерийн материал — ${fmtMoney(PRICE())} (нэг багц)
+  await send(psid, `📑 Тендерийн материал (нэг багц)
+
+Үнэ — таны илгээх ТББ-ийн хуудсаар:
+${PR.tierLines()}
 
 tender.gov.mn-ийн БАРАА, ҮЙЛЧИЛГЭЭНИЙ тендерт оролцох материалыг бэлтгэнэ:
 • Шалгах жагсаалт — ТББ-ийн шаардлага бүр, танд юу дутуу байгаа
@@ -74,12 +78,14 @@ async function onUploaded(psid) {
   if (st.s === "tnd_upload_more") { await S.setState(psid, { ...st, s: "tnd_analyzing" }); await send(psid, "Файлуудыг хүлээн авлаа. Дахин шинжилж байна ⏳"); await enqueue(psid, "analyze"); return; }
   if (st.s === "tnd_interview") { await send(psid, "Баримтуудыг хүлээн авлаа ✅ Бүх хариугаа бичиж дуусаад «✅ Бэлэн» товчийг дарна уу.", [["✅ Бэлэн", "TND_READY"], CANCEL_BTN]); return; }
   if (st.s !== "tnd_upload") return;
-  await S.setState(psid, { ...st, s: "tnd_lotask" });
-  await send(psid, "Файлуудыг хүлээн авлаа ✅\n\nТендер хэд хэдэн багцтай бол аль багцад оролцохоо бичнэ үү (багцын дугаар эсвэл нэр). Нэг төлбөр = нэг багц.", [["Ганц багцтай", "TND_ONELOT"], CANCEL_BTN]);
+  const files = await S.listFiles(psid), q = PR.quote(PR.sumPages(files, "tbb"));
+  if (q.over) { await send(psid, `ТББ-ийн нийт хэмжээ ${q.pages} хуудас байна — ${PR.maxPages()} хуудас хүртэл хүлээж авна. Шаардлагагүй хавсралтаа (зураг төсөл, каталог г.м.) холбоосоос хасаад «Дууслаа»-г дахин дарна уу:\n${st.url}`, [CANCEL_BTN]); return; }
+  await S.setState(psid, { ...st, s: "tnd_lotask", pages: q.pages, price: q.price });
+  await send(psid, `Файлуудыг хүлээн авлаа ✅\n\n${files.filter((f) => f.phase === "tbb").map((f, i) => `${i + 1}. ${f.name} — ${f.pages || 1} хуудас`).join("\n")}\n\nНийт ${q.pages} хуудас (${q.tierText}) → үнэ ${fmtMoney(q.price)}\n\nТендер хэд хэдэн багцтай бол аль багцад оролцохоо бичнэ үү (багцын дугаар эсвэл нэр). Нэг төлбөр = нэг багц.`, [["Ганц багцтай", "TND_ONELOT"], ["Файл нэмэх", "TND_MOREFILES"], CANCEL_BTN]);
 }
 
 async function offerPayment(psid, st) {
-  st.s = "tnd_pay"; st.price = PRICE();
+  st.s = "tnd_pay"; st.price = st.price || PR.quote(PR.sumPages(await S.listFiles(psid), "tbb")).price || PRICE();
   const QP = require("../org-v1/qpay");
   if (QP.allowedFor(psid)) {
     try {
@@ -110,16 +116,22 @@ async function paid(psid, via) {
 
 // Messenger-ийн хавсралтыг (зураг, файл) оролцогчийн баримт болгон хадгална
 async function saveAttachments(psid, atts) {
-  let n = 0;
+  let n = 0; const errs = [];
+  const st = await S.getState(psid).catch(() => null);
+  const phase = st && ["tnd_upload", "tnd_upload_more", "tnd_lotask"].includes(st.s) ? "tbb" : "bidder";
   for (const a of atts) {
     const url = a && a.payload && a.payload.url; if (!url) continue;
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(60000) }); if (!r.ok) continue;
       const buf = Buffer.from(await r.arrayBuffer()), mime = r.headers.get("content-type") || "";
       const name = decodeURIComponent((url.split("?")[0].split("/").pop() || "файл")).slice(0, 120);
-      const res = await S.addFile(psid, { name, mime, buf, phase: "bidder" }); if (res.ok) n++;
+      const pc = await PR.pagesOf({ buf, name, mime }); if (pc.error) { errs.push(`${name}: ${pc.error}`); continue; }
+      const before = PR.sumPages(await S.listFiles(psid), phase), cap = phase === "tbb" ? PR.maxPages() : PR.bidderMax();
+      if (before + pc.pages > cap) { errs.push(`${name}: нийт ${cap} хуудаснаас хэтэрнэ`); continue; }
+      const res = await S.addFile(psid, { name, mime, buf, phase, pages: pc.pages }); if (res.ok) n++; else errs.push(`${name}: ${res.error}`);
     } catch (e) { console.warn("[tender] хавсралт:", e.message); }
   }
+  if (errs.length) await send(psid, `⚠️ Хүлээж аваагүй: ${errs.join("; ")}`);
   return n;
 }
 
@@ -147,6 +159,7 @@ async function handle({ psid, text, payload, attachments }) {
       await send(psid, `ТББ-гээ энэ холбоосоор илгээгээд «Дууслаа» товчийг дарна уу:\n${st.url || uploadUrl(psid)}`, [CANCEL_BTN]); return "ext";
 
     case "tnd_lotask": {
+      if (payload === "TND_MOREFILES") { await S.setState(psid, { ...st, s: "tnd_upload" }); await send(psid, `Нэмэлт файлаа холбоосоор илгээгээд «Дууслаа» дарна уу, үнэ дахин бодогдоно:\n${st.url}`, [CANCEL_BTN]); return "ext"; }
       const lot = payload === "TND_ONELOT" ? null : text.slice(0, 200);
       if (!lot && payload !== "TND_ONELOT") { await send(psid, "Багцын дугаар эсвэл нэрийг бичнэ үү.", [["Ганц багцтай", "TND_ONELOT"], CANCEL_BTN]); return "ext"; }
       st.lot = lot; return offerPayment(psid, st);

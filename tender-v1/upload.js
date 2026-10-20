@@ -25,7 +25,7 @@ function tok(req, res, json = true) {
 }
 async function phaseOf(psid) { const st = await S.getState(psid).catch(() => null); return !st || ["tnd_upload", "tnd_upload_more", "tnd_lotask", "tnd_pay", "new"].includes(st.s) ? "tbb" : "bidder"; }
 const ACCEPT = /\.(pdf|docx|xlsx|xls|xlsm|pptx|csv|txt|jpe?g|png|webp)$/i;
-const pub = (f) => ({ id: f.id, name: f.name, size: f.size, phase: f.phase });
+const pub = (f) => ({ id: f.id, name: f.name, size: f.size, phase: f.phase, pages: f.pages });
 
 router.get("/u/tnd/:token", async (req, res) => { const t = tok(req, res, false); if (!t) return; res.set({ "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }).send(page(await phaseOf(t.psid))); });
 router.get("/u/tnd/:token/list", async (req, res) => { const t = tok(req, res); if (!t) return; res.json({ ok: true, files: (await S.listFiles(t.psid)).map(pub) }); });
@@ -36,7 +36,17 @@ router.post("/u/tnd/:token/file", rawBody, async (req, res) => {
   const mime = req.get("x-file-type") || "", buf = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
   if (!ACCEPT.test(name) && !/^image\/|pdf/.test(mime)) return res.json({ ok: false, error: "Энэ төрлийн файлыг хүлээж авахгүй (PDF, Word, Excel, зураг)" });
   if (/\.doc$/i.test(name)) return res.json({ ok: false, error: "Хуучин .doc форматыг Word-оор нээгээд .docx болгож хадгална уу" });
-  try { const r = await S.addFile(t.psid, { name, mime, buf, phase: await phaseOf(t.psid) }); res.json(r.ok ? { ok: true, id: r.file.id, duplicate: !!r.duplicate } : { ok: false, error: r.error }); }
+  try {
+    const PR = require("./pricing"), phase = await phaseOf(t.psid);
+    const pc = await PR.pagesOf({ buf, name, mime }); if (pc.error) return res.json({ ok: false, error: pc.error });
+    const list = await S.listFiles(t.psid), before = PR.sumPages(list, phase);
+    if (phase === "tbb" && before + pc.pages > PR.maxPages()) return res.json({ ok: false, error: `Нийт ${before + pc.pages} хуудас болж байна — ${PR.maxPages()} хуудас хүртэл хүлээж авна. Зураг төсөл, каталог зэрэг шаардлагагүй хавсралтаа хасаад илгээнэ үү.` });
+    if (phase === "bidder" && before + pc.pages > PR.bidderMax()) return res.json({ ok: false, error: `Баримтын нийт хэмжээ ${PR.bidderMax()} хуудаснаас хэтэрлээ. ТББ-д шаардсан баримтуудаа л илгээнэ үү (жишээ нь санхүүгийн тайлангийн эхний 2–3 хуудас).` });
+    const r = await S.addFile(t.psid, { name, mime, buf, phase, pages: pc.pages });
+    if (!r.ok) return res.json({ ok: false, error: r.error });
+    const now = PR.sumPages(await S.listFiles(t.psid), phase), q = PR.quote(now);
+    res.json({ ok: true, id: r.file.id, duplicate: !!r.duplicate, pages: pc.pages, total: now, price: phase === "tbb" ? PR.fmtMoney(q.price) : null });
+  }
   catch (e) { console.warn("[tender-upload]", e.message); res.json({ ok: false, error: "Хадгалж чадсангүй. Дахин оролдоно уу." }); }
 });
 router.use("/u/tnd/:token/file", (err, req, res, next) => { if (err && (err.type === "entity.too.large" || err.status === 413)) return res.status(413).json({ ok: false, error: "Файл хэт том. Нэг файл 25MB хүртэл." }); next(err); });
@@ -78,7 +88,7 @@ function client() {
       var it = q.shift(); if (!it) { busy = false; render(); msg.textContent = "Хадгалагдлаа. Бүгдийг илгээсэн бол «Дууслаа» дарна уу."; return; }
       it.st = "илгээж байна…"; render();
       fetch(base + "/file", { method: "POST", headers: { "Content-Type": "application/octet-stream", "x-file-name": encodeURIComponent(it.f.name), "x-file-type": it.f.type || "" }, body: it.f })
-        .then(function (r) { return r.json(); }).then(function (j) { it.sent = true; if (j.ok) { it.id = j.id; it.st = "✓ хадгалагдсан"; it.cls = "ok"; } else { it.st = j.error || "алдаа"; it.cls = "err"; } })
+        .then(function (r) { return r.json(); }).then(function (j) { it.sent = true; if (j.ok) { it.id = j.id; it.st = "✓ " + (j.pages || "") + " хуудас"; it.cls = "ok"; if (j.total) $("tot").textContent = j.total + " хуудас" + (j.price ? " · " + j.price : ""); } else { it.st = j.error || "алдаа"; it.cls = "err"; } })
         .catch(function () { it.sent = true; it.st = "сүлжээний алдаа"; it.cls = "err"; }).then(function () { render(); next(); });
     })();
   };
@@ -88,7 +98,7 @@ function client() {
       .then(function (j) { msg.textContent = j.ok ? "Баярлалаа. Messenger руугаа буцна уу — үргэлжлэлийг тэнд бичнэ." : (j.error || "Алдаа"); msg.className = j.ok ? "ok big" : "err"; })
       .catch(function () { msg.textContent = "Сүлжээний алдаа"; msg.className = "err"; }).then(function () { busy = false; render(); });
   };
-  fetch(base + "/list").then(function (r) { return r.json(); }).then(function (j) { (j.files || []).forEach(function (f) { files.push({ id: f.id, name: f.name, st: "✓ хадгалагдсан", cls: "ok", sent: true }); }); render(); }).catch(function () { });
+  fetch(base + "/list").then(function (r) { return r.json(); }).then(function (j) { (j.files || []).forEach(function (f) { files.push({ id: f.id, name: f.name, st: "✓ " + (f.pages || "") + " хуудас", cls: "ok", sent: true }); }); render(); }).catch(function () { });
   render();
 }
 function page(phase) {
@@ -108,7 +118,7 @@ button{width:100%;margin-top:12px;padding:14px;border:0;border-radius:12px;font-
 <div class="card"><h2>Илгээх</h2><ul class="chk">${items.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>
 <div class="card"><label class="pick" for="f">Файл сонгох</label><input id="f" type="file" multiple accept=".pdf,.docx,.xls,.xlsx,.xlsm,.pptx,.csv,.txt,image/*"><ul id="list"></ul>
 <button id="send" disabled>Сонгосон файлуудыг илгээх</button><p class="small">PDF, Word, Excel, зураг. Нэг файл 25MB хүртэл.</p>
-<button id="done" disabled>Дууслаа</button><p id="msg"></p></div></div><script>(${client.toString()})();</script></body></html>`;
+<p class="small">Нийт: <b id="tot">—</b></p>${tbb ? `<p class="small">Үнэ ТББ-ийн нийт хуудсаар:<br>${require("./pricing").tierLines().replace(/\n/g, "<br>")}</p>` : ""}<button id="done" disabled>Дууслаа</button><p id="msg"></p></div></div><script>(${client.toString()})();</script></body></html>`;
 }
 
 module.exports = router;

@@ -6,6 +6,7 @@ const S = require("./store");
 const AI = require("./ai");
 const { readAll, joinDocs } = require("./read");
 const { buildPackage } = require("./engine");
+const CX = require("./context");
 const { send, sendFile, admin, fmtMoney } = require("./msg");
 const { checkContent, blockedError } = require("../plan-v2/guard");
 
@@ -33,14 +34,21 @@ async function runAnalyze(job, log = console.log) {
   if (!docs.length) throw new Error("Уншиж болох файл алга");
   // ТББ нь төрийн байгууллагын баримт (харуул хамгаалалт, зэвсэглэл г.м. үг байж болно) — шалгалтыг зөвхөн оролцогчийн яриа дээр хийнэ
   if ((st.conv || []).length) await guard(convText(st.conv));
-  const text = joinDocs(docs);
+  const fit = CX.fitDocs(docs);
+  if (fit.removed.length) log(`[tender ${job.id}] стандарт хэсэг хассан: ${fit.removed.map((x) => `${x.file}: ${x.name} (${x.chars})`).join("; ")}`);
+  const wins = CX.windows(joinDocs(fit.docs)), text = wins[0];
 
-  step("A2/4 ТББ задалж байна");
+  step(`A2/4 ТББ задалж байна${wins.length > 1 ? ` (${wins.length} хэсэг)` : ""}`);
   const a = await AI.analyzeTender(text, st.lot || job.lot);
-  const tender = a.tender || {};
+  let tender = a.tender || {};
+  if (tender.name && a.lot_found !== false) for (let i = 1; i < wins.length; i++) {
+    const add = await AI.analyzeMore(wins[i], tender, i + 1, wins.length);
+    tender = CX.mergeTender(tender, add); if (add && add.contract) tender.contract = { ...(tender.contract || {}), ...add.contract };
+  }
+  a.tender = tender;
   const lots = Array.isArray(a.lots) ? a.lots : [];
   const skipped = files.filter((f) => !f.ok);
-  await S.patchCase(psid, { a1: a, files, analyzedAt: Date.now() });
+  await S.patchCase(psid, { a1: a, files, removed: fit.removed, windows: wins.length, analyzedAt: Date.now() });
 
   // Олон багцтай, сонгосон багц олдсонгүй → багц сонгуулна (нэмэлт төлбөргүй)
   if (a.lot_found === false && lots.length > 1) {
@@ -99,7 +107,7 @@ async function runCompose(job, log = console.log) {
   await guard(conv);
   step("B1/5 файл уншиж байна");
   const { docs, files } = await readAll(psid, { log, mock: job.mockRead });
-  const text = joinDocs(docs);
+  const text = CX.composeContext(CX.fitDocs(docs).docs, joinDocs);
   const base = JSON.parse(JSON.stringify(kase.base));
   base.now = nowMN();
 
