@@ -202,6 +202,40 @@ async function interview(f, text) {
   return { reply, ready: !!out.ready, blocked: !!out.blocked };
 }
 
+// ---- Итгүүлэх хариулт (тайлан, төлөвлөгөө, маркетинг — материал хүлээх / төлбөр хүлээх үед текст ирвэл) ----
+const SALES_MAX = Number(process.env.FLOW_SALES_MAX || 6);
+const ABOUT = {
+  marketing: "40–75 хуудас маркетингийн хэрэгжүүлэх хөтөч: зах зээл, өрсөлдөгчийн шинжилгээ, стратеги, зарын бэлэн текст, 30 хоногийн контент календарь, сар бүрийн төсөв, KPI (PDF, Word, Excel). Төлөвлөгөөгүй сурталчилгааны төлбөр ихэвчлэн буруу хүнд хүрч дэмий зарцуулагддаг; энэ хөтөч сурталчилгааны төлбөрийг хаана, хэнд, юунд зарцуулахыг тодорхойлно.",
+  report: "Захиалагчийн илгээсэн эмх цэгцгүй материалаас (Excel, PDF, тэмдэглэл, зураг) тоо зохиохгүйгээр бүтэцтэй, мэргэжлийн түвшний тайлан (Word, PDF) бэлтгэнэ; дутуу эсвэл зөрүүтэй мэдээллийг тусад нь жагсааж харуулна. Тайлан бичихэд ихэвчлэн хэдэн өдөр зарцуулагддаг ажлыг хэмнэнэ.",
+  plan: "Өмнөх үеийн материал дээр үндэслэн дараагийн хугацааны ажлын/үйл ажиллагааны төлөвлөгөө (Word, PDF; байгууллагын төлөвлөгөөнд томьёотой Excel төсөв) бэлтгэнэ; зорилт, арга хэмжээ, хариуцагч, хугацаа, хэмжих үзүүлэлттэй. Тоо зохиохгүй, дутуу мэдээллийг жагсаана.",
+};
+function aboutFor(product) {
+  if (product === "marketing") return ABOUT.marketing;
+  if (/^bundle/.test(product)) return ABOUT.report + " Мөн: " + ABOUT.plan + " Багцаар авбал тусад нь авахаас хямд.";
+  return /^plan/.test(product) ? ABOUT.plan : ABOUT.report;
+}
+const PERSUADE = `Чи «Менежер AI»-ийн Facebook Messenger дээрх борлуулалтын зөвлөх. Захиалагч үйлчилгээгээ сонгосон ч материал илгээх эсвэл төлбөр төлөх шатанд эргэлзэж, асуулт бичжээ. Зорилго: асуултад нь шууд, шударга хариулж, яагаад энэ үйлчилгээ түүнд ашигтайг итгэлтэйгээр тайлбарлаад дараагийн алхам руу хөтлөх.
+Дүрэм:
+- «Ойлгож байна», «санаа зовох хэрэггүй» гэх хоосон үгээр бүү өнгөрөө. Эргэлзээг нь нэрлэж, тодорхой баримтаар хариул: юу авах, юуг хэмнэх (цаг, ажил), мэргэжилтнээр (тухайн ажлыг хийдэг хүнээр) хийлгэх эсвэл өөрөө хийхтэй харьцуулбал.
+- Зөвхөн доор өгсөн үнэ, мэдээллийг хэл. Хуурамч хөнгөлөлт, «өнөөдөр л» гэх дарамт, зохиомол сэтгэгдэл, өрсөлдөгчийн үнэ, хүргэх хугацааг зохиохгүй. Үр дүнгийн баталгаа өгөхгүй. «Зөвлөх» гэдэг үг бүү хэрэглэ.
+- Захиалагч сонирхохгүй бол шахахгүй, эелдгээр баярлалаа гэж хэл.
+- Хариултын төгсгөлд нэг тодорхой алхам: материал илгээх шатанд — «доорх холбоосоор материалаа илгээнэ үү»; төлбөрийн шатанд — «доорх QPay холбоосоор/төлбөрийн мэдээллээр төлнө үү». Холбоос, данс өөрөө бүү бич — систем дараагийн мессежээр илгээнэ.
+- Алдаагүй энгийн монгол хэлээр, «Та» гэж. Markdown (** #) бүү ашигла, жагсаалтад «•». 500 тэмдэгтээс бүү хэтрүүл.
+Зөвхөн JSON: {"reply":"..."}`;
+async function persuade(f, text) {
+  f.salesN = (f.salesN || 0) + 1;
+  f.salesLog = (f.salesLog || []).concat([`Захиалагч: ${String(text).slice(0, 500)}`]).slice(-8);
+  const price = f.price ? fmtMoney(f.price) : (f.product === "marketing" ? `${fmtMoney(MKT_PRICE)} (бизнес төсөлтэй багцаар 249 900₮)` : (PRODUCTS[f.product] ? tiers(f.product) : ""));
+  const stage = f.s === "awaiting_payment" ? "төлбөр хүлээж байна" : "материал илгээхийг хүлээж байна";
+  try {
+    const out = await callJSON({ system: PERSUADE, user: `ҮЙЛЧИЛГЭЭ: ${NAMES[f.product] || f.product}\nҮНЭ: ${price}\nЮУ АВАХ: ${aboutFor(f.product)}\nШАТ: ${stage}\n\nӨМНӨХ ЯРИА:\n${f.salesLog.join("\n")}\n\nДараагийн хариугаа JSON-оор бич.`, model: process.env.FLOW_MODEL || WRITER, maxTokens: 1500 });
+    const reply = String(out.reply || "").trim();
+    if (reply) f.salesLog.push(`Менежер AI: ${reply.slice(0, 500)}`);
+    return reply;
+  } catch (e) { console.warn("[flow] persuade:", e.message); return ""; }
+}
+const wantsTalk = (f, text, payload) => !!text && !payload && (f.salesN || 0) < SALES_MAX;
+
 // ---- Үйлчилгээ эхлүүлэх ----
 async function startOrg(psid, f, product) {
   const { tokenFor } = require("./upload");
@@ -317,6 +351,7 @@ async function handle({ psid, text, payload, attachments }) {
       await setF(psid, f); await send(psid, r.reply, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
     case "uploading":
+      if (wantsTalk(f, text, payload)) { const rep = await persuade(f, text); await setF(psid, f); if (rep) await send(psid, rep); }
       await send(psid, `Материалаа энэ холбоосоор илгээгээд «Дууслаа» товчийг дарна уу:\n${f.url}`, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     case "awaiting_payment": {
       if (payload === "FLOW_QPCHECK" && f.qpay) return qpCheck(psid, f);
@@ -330,6 +365,7 @@ async function handle({ psid, text, payload, attachments }) {
         return "ext";
       }
       if (atts.length) { await send(psid, "Төлбөрийн баримтыг зураг (screenshot) хэлбэрээр илгээнэ үү."); return "ext"; }
+      if (!f.rev && wantsTalk(f, text, payload)) { const rep = await persuade(f, text); await setF(psid, f); if (rep) await send(psid, rep); }
       if (f.qpay) { await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. QPay-ээр төлөх холбоос:\n${f.qpay.short || ""}\n\nТөлсний дараа «Төлсөн, шалгах» товчийг дарна уу.`, [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]); return "ext"; }
       await send(psid, `Төлбөр ${fmtMoney(f.price || 0)}. Шилжүүлсний дараа гүйлгээний баримтын зургийг энд илгээнэ үү.${payInfo() ? "\n\n" + payInfo() : ""}`, f.url ? [["Материал нэмэх", "FLOW_MORE"], ["Цуцлах", "FLOW_CANCEL"]] : [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
@@ -482,3 +518,4 @@ module.exports.onRevReject = onRevReject;
 module.exports.handleMessage = handle;
 module.exports.adminAction = admin;
 module.exports._getF = getF;
+module.exports._setF = setF;
