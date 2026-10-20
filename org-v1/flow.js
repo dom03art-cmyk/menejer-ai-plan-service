@@ -47,7 +47,7 @@ async function sendImage(psid, url) {
 }
 const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]];
 // tender-v1: TENDER_ENABLED=1 үед л цэсэнд «Тендерийн материал» нэмэгдэнэ
-const menuBtns = () => (process.env.TENDER_ENABLED === "1" ? [...MENU, ["Тендерийн материал", "TENDER"]] : MENU);
+const menuBtns = (psid) => (process.env.TENDER_ENABLED === "1" || String(process.env.TENDER_ALLOW_PSIDS || "").split(",").map((x) => x.trim()).includes(String(psid)) ? [...MENU, ["Тендерийн материал", "TENDER"]] : MENU);
 // Тайлан, төлөвлөгөөний цэс 2 алхамтай: эхлээд хэлтэс/байгууллага, дараа нь тайлан/төлөвлөгөө/багц
 const GROUP_BTN = [["1. Хэлтэс", "FLOW_G_dept"], ["2. Байгууллага", "FLOW_G_org"], ["Цуцлах", "FLOW_CANCEL"]];
 const DEPT_BTN = [["1. Тайлан", "FLOW_P_report_dept"], ["2. Төлөвлөгөө", "FLOW_P_plan_dept"], ["3. Багц", "FLOW_P_bundle_dept"], ["Цуцлах", "FLOW_CANCEL"]];
@@ -63,7 +63,7 @@ const PICK = { group: ["G:dept", "G:org"], dept: ["report_dept", "plan_dept", "b
   per: ["T:year", "T:half", "T:quarter", "T:month"], per_half: ["N:1", "N:2"], per_quarter: ["N:1", "N:2", "N:3", "N:4"], per_month: Array.from({ length: 12 }, (_, i) => `N:${i + 1}`) };
 const BTN = { group: GROUP_BTN, dept: DEPT_BTN, org: ORG_BTN, per: PER_BTN, per_half: SUB_BTN.half, per_quarter: SUB_BTN.quarter, per_month: SUB_BTN.month };
 const NUMHINT = "Товч дарах эсвэл дугаарыг нь (1, 2, 3) бичээд илгээж болно.";
-const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, `${text}\n\n👉 Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.`, menuBtns()); return "selecting_type"; };
+const toMenu = async (psid, text = "Танд өөр ямар үйлчилгээ хэрэгтэй вэ? Доорх товчноос сонгоно уу.") => { await send(psid, `${text}\n\n👉 Товчнуудыг хажуу тийш гүйлгэвэл бүгд харагдана.`, menuBtns(psid)); return "selecting_type"; };
 
 const from = (p) => fmtMoney(priceFor(p, 5).price);
 async function showMenu(psid, menu) {
