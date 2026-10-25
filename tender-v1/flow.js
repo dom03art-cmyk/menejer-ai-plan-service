@@ -103,8 +103,8 @@ async function onUploaded(psid) {
   if (st.s !== "tnd_upload") return;
   const files = await S.listFiles(psid), q = PR.quote(PR.sumPages(files, "tbb"));
   if (q.over) { await send(psid, `ТББ-ийн нийт хэмжээ ${q.pages} хуудас байна — ${PR.maxPages()} хуудас хүртэл хүлээж авна. Шаардлагагүй хавсралтаа (зураг төсөл, каталог г.м.) холбоосоос хасаад «Дууслаа»-г дахин дарна уу:\n${st.url}`, [CANCEL_BTN]); return; }
-  await S.setState(psid, { ...st, s: "tnd_lotask", pages: q.pages, price: q.price });
-  await send(psid, `Файлуудыг хүлээн авлаа ✅\n\n${files.filter((f) => f.phase === "tbb").map((f, i) => `${i + 1}. ${f.name} — ${f.pages || 1} хуудас`).join("\n")}\n\nНийт ${q.pages} хуудас (${q.tierText}) → үнэ ${fmtMoney(q.price)}\n\nТендер хэд хэдэн багцтай бол аль багцад оролцохоо бичнэ үү (багцын дугаар эсвэл нэр). Нэг төлбөр = нэг багц.`, [["Ганц багцтай", "TND_ONELOT"], ["Файл нэмэх", "TND_MOREFILES"], CANCEL_BTN]);
+  await S.setState(psid, { ...st, s: "tnd_lotask", pages: q.pages, price: st.paidRetry ? st.price : q.price });
+  await send(psid, `Файлуудыг хүлээн авлаа ✅\n\n${files.filter((f) => f.phase === "tbb").map((f, i) => `${i + 1}. ${f.name} — ${f.pages || 1} хуудас`).join("\n")}\n\nНийт ${q.pages} хуудас${st.paidRetry ? " (төлбөр төлөгдсөн)" : ` (${q.tierText}) → үнэ ${fmtMoney(q.price)}`}\n\nТендер хэд хэдэн багцтай бол аль багцад оролцохоо бичнэ үү (багцын дугаар эсвэл нэр). Нэг төлбөр = нэг багц.`, [["Ганц багцтай", "TND_ONELOT"], ["Файл нэмэх", "TND_MOREFILES"], CANCEL_BTN]);
 }
 
 async function offerPayment(psid, st) {
@@ -188,7 +188,9 @@ async function handle({ psid, text, payload, attachments }) {
       if (payload === "TND_MOREFILES") { await S.setState(psid, { ...st, s: "tnd_upload" }); await send(psid, `Нэмэлт файлаа холбоосоор илгээгээд «Дууслаа» дарна уу, үнэ дахин бодогдоно:\n${st.url}`, [CANCEL_BTN]); return "ext"; }
       const lot = payload === "TND_ONELOT" ? null : text.slice(0, 200);
       if (!lot && payload !== "TND_ONELOT") { await send(psid, "Багцын дугаар эсвэл нэрийг бичнэ үү.", [["Ганц багцтай", "TND_ONELOT"], CANCEL_BTN]); return "ext"; }
-      st.lot = lot; return offerPayment(psid, st);
+      st.lot = lot;
+      if (st.paidRetry) { await S.setState(psid, { ...st, s: "tnd_analyzing" }); await send(psid, "Хүлээн авлаа ✅ ТББ-г шинжилж байна ⏳ 10–25 минут болно."); await enqueue(psid, "analyze"); return "ext"; }
+      return offerPayment(psid, st);
     }
 
     case "tnd_pay": {
@@ -252,6 +254,14 @@ async function handle({ psid, text, payload, attachments }) {
     }
 
     case "tnd_done": {
+      if (payload === "TND_NEWTENDER") {
+        if (!st.retry) { await S.setState(psid, { ...st, s: "tnd_left" }); return toMenu(psid, "Өөр тендер илгээх эрх ашиглагдсан байна. Шинэ тендерт «Тендерийн материал»-аар захиална уу."); }
+        await S.clear(psid).catch(() => { });
+        const url = uploadUrl(psid);
+        await S.setState(psid, { s: "tnd_upload", url, conv: [], paidRetry: true, retried: true, price: st.price, paidAt: st.paidAt });
+        await send(psid, `📄 Шинэ тендерийн ТББ-гээ (tender.gov.mn-ээс татсан PDF/Word) энэ холбоосоор илгээгээд «Дууслаа» дарна уу. Дахин төлөх шаардлагагүй.\n\n⚠️ Эцсийн хугацаа нь дор хаяж 3–5 ажлын өдрийн дараа байгаа тендер сонгоорой.\n\n${url}`, [CANCEL_BTN]);
+        return "ext";
+      }
       if (payload === "TND_RERUN") {
         const free = (st.delivered || 0) <= 1 && Date.now() - (st.deliveredAt || 0) < RERUN_DAYS * 864e5;
         if (st.final || !free) { await S.setState(psid, { ...st, s: "tnd_left" }); await send(psid, st.final ? "Энэ захиалгыг дахин гаргах боломжгүй." : "Үнэгүй дахин гаргах эрх ашиглагдсан эсвэл хугацаа дууссан. Шинэ тендерт «Тендерийн материал» товчоор захиална уу."); return toMenu(psid); }

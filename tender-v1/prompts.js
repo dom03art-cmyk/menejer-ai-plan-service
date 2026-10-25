@@ -58,6 +58,7 @@ const A1 = (lot) => `ДААЛГАВАР A1 — ТББ задлах.
 - now талбарыг бүү бөглө (код бөглөнө).
 Зөвхөн JSON:
 {"type":"goods|services|works","works_like":false,"works_reason":"",
+ "name":"тендерийн нэр (багц олдоогүй ч)","deadline":"ISO +08:00 — тендер хүлээн авах эцсийн хугацаа (багц олдоогүй ч заавал)",
  "lots":[{"no":"1","name":"…","budget":0}],"lot_found":true,
  "meta":{"type":"goods|services","standard_version":"…","source_files":["файлын нэр"]},
  "tender":{…json-contract-ын tender…},

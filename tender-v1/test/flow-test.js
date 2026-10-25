@@ -63,6 +63,23 @@ async function toPaid(psid, lot) {
   p = "U4"; await toPaid(p);
   ok(msgs(p).some((m) => /хугацаа .*дууссан/.test(m.text || "")), "хугацаа дууссаныг мэдэгдэв");
 
+  console.log("4б) Хугацаа дууссан → төлбөрөөрөө өөр тендер илгээх");
+  ok(msgs(p).some((m) => (m.buttons || []).includes("📄 Өөр тендер илгээх")), "«Өөр тендер илгээх» товч ирэв");
+  await say(p, { payload: "TND_NEWTENDER" });
+  ok((await S.getState(p)).s === "tnd_upload" && (await S.listFiles(p)).length === 0, "хуучин файл цэвэрлэгдэж, шинэ ТББ хүлээж байна");
+  process.env.TENDER_MOCK_CASE = "security";
+  await S.addFile(p, { name: "TBB2.pdf", mime: "application/pdf", buf: Buffer.from("ТББ 2"), phase: "tbb" });
+  await F.onUploaded(p); await say(p, { payload: "TND_ONELOT" }); await idle();
+  ok((await S.getState(p)).s === "tnd_interview" && !msgs(p).slice(-6).some((m) => /💳 Төлбөр/.test(m.text || "")), "дахин төлбөргүйгээр шинжилж асуулт ирэв");
+  await say(p, { payload: "TND_NEWTENDER" });
+  ok((await S.getState(p)).s === "tnd_interview", "ярилцлагын үед «өөр тендер» товч ажиллахгүй");
+
+  console.log("4в) Олон багцтай, хугацаа дууссан → багц асуухгүй шууд мэдэгдэнэ");
+  process.env.TENDER_MOCK_CASE = "office"; process.env.TENDER_MOCK_LOTEXPIRED = "1"; MOCK.reset();
+  p = "U4c"; await toPaid(p);
+  ok((await S.getState(p)).s === "tnd_done" && msgs(p).some((m) => /хугацаа .*дууссан/.test(m.text || "")) && MOCK.calls.filter((x) => x === "A1").length === 1, "багц сонгуулалгүй, 1 шинжилгээгээр зогсов");
+  delete process.env.TENDER_MOCK_LOTEXPIRED;
+
   console.log("5) Claude аргачлал орхисон → автоматаар засав");
   process.env.TENDER_MOCK_CASE = "security"; process.env.TENDER_MOCK_BREAK = "1"; MOCK.reset();
   p = "U5"; await toPaid(p); await say(p, { text: "доод үнэ 70 сая" }); await say(p, { payload: "TND_GO" }); await idle();

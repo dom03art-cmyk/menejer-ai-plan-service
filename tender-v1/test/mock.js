@@ -18,7 +18,7 @@ function respond(task, user) {
   tender.deadline = fut(10); tender.opening = fut(10);
   if (c === "expired") tender.deadline = "2026-01-05T10:00:00+08:00";
   if (task === "A1") {
-    if (c === "office" && !/Багц 3/.test(user)) return { type: "goods", lots: [{ no: "1", name: "Цаас", budget: 30000000 }, { no: "2", name: "Хавтас", budget: 12000000 }, { no: "3", name: "Бичиг хэргийн жижиг материал", budget: 9900000 }], lot_found: false, tender: {} };
+    if (c === "office" && !/Багц 3/.test(user)) return { type: "goods", lots: [{ no: "1", name: "Цаас", budget: 30000000 }, { no: "2", name: "Хавтас", budget: 12000000 }, { no: "3", name: "Бичиг хэргийн жижиг материал", budget: 9900000 }], lot_found: false, tender: {}, name: "Бичиг хэргийн материал", deadline: process.env.TENDER_MOCK_LOTEXPIRED === "1" ? "2026-01-05T10:00:00+08:00" : fut(10) };
     return { type: c === "works" ? "works" : d.meta.type, works_like: c === "works", works_reason: c === "works" ? "БА-2.2 тусгай зөвшөөрөл, ажлын төсөв шаардсан" : "", lots: [], lot_found: true,
       meta: { type: d.meta.type, standard_version: d.meta.standard_version, source_files: d.meta.source_files }, tender, unreadable: [],
       brief: `«${tender.name}»\nЗахиалагч: ${tender.procuring_entity}\nТөсөвт өртөг: ${tender.budget}₮\nЭцсийн хугацаа: ${tender.deadline}` };

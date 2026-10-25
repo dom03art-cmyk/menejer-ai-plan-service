@@ -11,6 +11,7 @@ const { send, sendFile, admin, fmtMoney } = require("./msg");
 const { checkContent, blockedError } = require("../plan-v2/guard");
 
 // Монгол цаг (+08:00) ISO
+const RETRY_BTN = [["📄 Өөр тендер илгээх", "TND_NEWTENDER"], ["Цэс", "FLOW_MENU"]];
 const nowMN = () => new Date(Date.now() + 8 * 3600e3).toISOString().replace(/\.\d+Z$/, "+08:00");
 const TR = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "yo", ж: "j", з: "z", и: "i", й: "i", к: "k", л: "l", м: "m", н: "n", о: "o", ө: "u", п: "p", р: "r", с: "s", т: "t", у: "u", ү: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh", щ: "sh", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya" };
 const ascii = (s) => [...String(s).toLowerCase()].map((c) => TR[c] ?? c).join("").replace(/[^a-z0-9.]+/g, "-").replace(/^-|-$/g, "");
@@ -51,6 +52,14 @@ async function runAnalyze(job, log = console.log) {
   await S.patchCase(psid, { a1: a, files, removed: fit.removed, windows: wins.length, analyzedAt: Date.now() });
 
   // Олон багцтай, сонгосон багц олдсонгүй → багц сонгуулна (нэмэлт төлбөргүй)
+  // Хугацаа дууссан бол багц сонгуулахгүй — шууд мэдэгдэнэ (дахин шинжилгээний зардал гаргахгүй)
+  const dl0 = tender.deadline || a.deadline;
+  if (dl0 && new Date(dl0) < new Date() && a.lot_found === false) {
+    await send(psid, `«${a.name || tender.name || "Тендер"}»\n\n⏰ Энэ тендерийн хүлээн авах хугацаа (${deadlineText(dl0)}) дууссан байна. Тиймээс материал бэлтгэх боломжгүй.\n\nТа төлбөрөө ашиглан өөр (хугацаа нь дуусаагүй) тендер илгээж болно.`, RETRY_BTN);
+    await admin(`ℹ️ Тендер (${psid}): хугацаа дууссан тендер илгээсэн — өөр тендер илгээх эрх өгөв.`);
+    await S.setState(psid, { ...st, s: "tnd_done", final: true, retry: !st.retried });
+    job.outcome = "deadline_passed"; return job;
+  }
   if (a.lot_found === false && lots.length > 1) {
     await S.setState(psid, { ...st, s: "tnd_lot", lots });
     await send(psid, `Энэ тендер ${lots.length} багцтай байна. Аль багцад оролцохыг сонгоно уу:\n\n${lots.map((l, i) => `${i + 1}️⃣ Багц ${l.no}: ${l.name}${l.budget ? ` — ${fmtMoney(l.budget)}` : ""}`).join("\n")}\n\nТовч дарах эсвэл дугаарыг бичнэ үү.`, lots.slice(0, 10).map((l, i) => [`${i + 1}. Багц ${l.no}`, `TND_LOT_${i}`]));
@@ -74,11 +83,13 @@ async function runAnalyze(job, log = console.log) {
     const r = await buildPackage(base);
     const why = passed ? `⏰ Энэ тендерийн хүлээн авах хугацаа (${deadlineText(tender.deadline)}) дууссан байна. Тиймээс оролцох материал бэлтгэх боломжгүй.`
       : `🏗 Энэ тендер нэр нь «үйлчилгээ» байсан ч агуулгаараа барилга угсралтын ажил (${a.works_reason || "барилгын тусгай зөвшөөрөл, ажлын зураг, төсөв шаардсан"}). Ийм тендерийн ажлын төсвийг барилгын мэргэжлийн төсөвчин гаргадаг тул бид зөвхөн шалгах жагсаалтыг бэлтгэлээ.`;
-    await send(psid, `«${tender.name}»\n\n${why}\n\nШалгах жагсаалтыг (ТББ-ийн бүх шаардлага) файлаар илгээлээ. Төлбөрийн асуудлаар манай ажилтан тантай холбогдоно.`);
+    const canRetry = !st.retried;
+    await send(psid, `«${tender.name}»\n\n${why}\n\nШалгах жагсаалтыг (ТББ-ийн бүх шаардлага) файлаар илгээлээ.${canRetry ? " Та төлбөрөө ашиглан өөр тендер илгээж болно." : " Төлбөрийн асуудлаар манай ажилтан тантай холбогдоно."}`);
     await sendFile(psid, r.files[0].buf, "01-shalgakh-jagsaalt.docx", r.files[0].mime);
     await admin(`⚠️ Тендер (${psid}): ${passed ? "хугацаа дууссан" : "барилгын шинжтэй"} — зөвхөн шалгах жагсаалт илгээв. Төлбөр буцаах эсэхийг шийднэ үү.`);
     await S.patchCase(psid, { base, outcome: passed ? "deadline_passed" : "works_like" });
-    await S.setState(psid, { s: "tnd_done", final: true });
+    if (canRetry) await send(psid, "Өөр тендерийн ТББ илгээх бол доорх товчийг дарна уу.", RETRY_BTN);
+    await S.setState(psid, { ...st, s: "tnd_done", final: true, retry: canRetry });
     job.outcome = passed ? "deadline_passed" : "works_like"; return job;
   }
 
