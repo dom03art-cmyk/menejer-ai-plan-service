@@ -25,7 +25,7 @@ const OUTLINE = require("./outline");
 function makeFin(an, rv, res) {
   const fin = build(an);
   fin.facts.feasibility = { viable: rv.viable, changes: rv.changes, reason: rv.reason || "" };
-  fin.sources = [...new Set([...(res.macro || []), ...(res.market || [])].map(x => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
+  fin.sources = [...new Set([...(res.macro || []), ...(res.market || []), ...(res.tech || [])].map(x => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
   if (!fin.sources.length) fin.sources = ["Захиалагчийн өгсөн мэдээлэл", "Төслийн санхүүгийн загвар"];
   return fin;
 }
@@ -35,7 +35,7 @@ async function runFull(job, step, log) {
   step("1/7 таамаглал гаргаж байна");
   const A0 = job.assumptions ? normalize(job.assumptions) : await extract(job.conversation);
   step("2/7 судалгаа");
-  let res = { macro: [], market: [] };
+  let res = { macro: [], market: [], tech: [] };
   try { res = await research(A0); } catch (e) { log(`[${job.id}] судалгаа амжилтгүй, судалгаагүй үргэлжилнэ: ${e.message}`); }
   step("3/7 санхүүгийн загвар ба боломжийн шалгалт");
   const rv = await review(A0, analyse(A0), res, job.conversation, (m) => log(`[${job.id}] ${m}`));

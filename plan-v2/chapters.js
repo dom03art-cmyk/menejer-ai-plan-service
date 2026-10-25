@@ -42,7 +42,10 @@ function factsFor(group, ctx) {
   const r = ctx.research;
   if (group === "ch2a") return r.macro;
   if (group === "ch1") return [...r.macro.slice(0, 10), ...r.market];
-  if (["ch2b", "ch2c", "ch3", "ch5"].includes(group)) return r.market;
+  const tech = r.tech || [];
+  if (group === "ch2c") return [...r.market, ...tech];
+  if (["ch3", "ch5"].includes(group)) return [...r.market, ...tech];
+  if (group === "ch2b") return r.market;
   return [];
 }
 

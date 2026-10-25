@@ -41,7 +41,7 @@ const OPT_SYSTEM = `Чи Монголын банкны зээлийн шинжэ
 // Хэт өөдрөг үр дүнг нэг удаа хянуулна. Алдаа гарвал эсвэл үр дүн муудвал анхныхаа хэвээр үлдэнэ.
 async function realism(best, research, conversation, log) {
   try {
-    const user = `ОДООГИЙН ТААМАГЛАЛ:\n${JSON.stringify(best.A)}\n\nҮР ДҮН: ${JSON.stringify(metrics(best.an))}\n\nЗАХИАЛАГЧИЙН ЯРИА:\n${(conversation || "").slice(0, 10000)}\n\nСУДАЛГААНЫ БАРИМТ:\n${JSON.stringify([...(research.market || []), ...(research.macro || [])].slice(0, 30))}`;
+    const user = `ОДООГИЙН ТААМАГЛАЛ:\n${JSON.stringify(best.A)}\n\nҮР ДҮН: ${JSON.stringify(metrics(best.an))}\n\nЗАХИАЛАГЧИЙН ЯРИА:\n${(conversation || "").slice(0, 10000)}\n\nСУДАЛГААНЫ БАРИМТ:\n${JSON.stringify([...(research.tech || []).slice(0, 15), ...(research.market || []), ...(research.macro || [])].slice(0, 40))}`;
     const out = await callJSON({ system: OPT_SYSTEM, user, maxTokens: 32000 });
     const patch = out && out.patch;
     if (!patch || typeof patch !== "object" || !Object.keys(patch).length) { log("бодит байдлын шалгалт: өөрчлөлтгүй"); return best; }
@@ -58,7 +58,7 @@ async function realism(best, research, conversation, log) {
 async function review(A, an, research, conversation, log) {
   let best = { A, an, changes: [] };
   for (let round = 1; round <= 2 && !viable(best.an); round++) {
-    const user = `ОДООГИЙН ТААМАГЛАЛ:\n${JSON.stringify(best.A)}\n\nҮР ДҮН: ${JSON.stringify(metrics(best.an))}\n\nЗАХИАЛАГЧИЙН ЯРИА:\n${(conversation || "").slice(0, 10000)}\n\nСУДАЛГААНЫ БАРИМТ:\n${JSON.stringify([...(research.market || []), ...(research.macro || [])].slice(0, 30))}`;
+    const user = `ОДООГИЙН ТААМАГЛАЛ:\n${JSON.stringify(best.A)}\n\nҮР ДҮН: ${JSON.stringify(metrics(best.an))}\n\nЗАХИАЛАГЧИЙН ЯРИА:\n${(conversation || "").slice(0, 10000)}\n\nСУДАЛГААНЫ БАРИМТ:\n${JSON.stringify([...(research.tech || []).slice(0, 15), ...(research.market || []), ...(research.macro || [])].slice(0, 40))}`;
     let out;
     try { out = await callJSON({ system: SYSTEM, user, maxTokens: 32000 }); } catch (e) { log(`feasibility алдаа: ${e.message}`); break; }
     const patch = out && (out.patch || out.assumptions);
