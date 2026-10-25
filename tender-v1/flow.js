@@ -21,23 +21,37 @@ const CANCEL = /^(цуцла|болих|буцах|cancel|stop)/i;
 // Туршилтын үед зөвхөн жагсаалтад байгаа psid (админ) ашиглана
 function allowed(psid) {
   const list = String(process.env.TENDER_ALLOW_PSIDS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  return !list.length || list.includes(String(psid));
+  return !list.length || list.includes(String(psid)) || testers.has(String(psid));
 }
+// Туршигч: TENDER_ALLOW_PSIDS-д байгаа эсвэл туршилтын нууц үгийг (TENDER_TEST_CODE) бичсэн psid
+const testers = new Set(); let testersLoaded = false;
+async function loadTesters() { if (testersLoaded) return; testersLoaded = true; try { for (const p of (await S.getMisc("testers")) || []) testers.add(String(p)); } catch (_) { } }
+function isTester(psid) {
+  const list = String(process.env.TENDER_ALLOW_PSIDS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  return list.includes(String(psid)) || testers.has(String(psid));
+}
+async function addTester(psid) { testers.add(String(psid)); await S.setMisc("testers", [...testers]).catch(() => { }); }
 const enabled = () => process.env.TENDER_ENABLED === "1";
 
 // Энэ мессежийг тендерийн урсгал хүлээж авах уу
 async function claims(psid, payload, text) {
   payload = String(payload || "");
-  if (process.env.TENDER_ALLOW_PSIDS && allowed(psid)) {
+  await loadTesters();
+  const code = String(process.env.TENDER_TEST_CODE || "").trim().toLowerCase();
+  if (!payload && code && String(text || "").trim().toLowerCase() === code) {
+    if (!isTester(psid)) { await addTester(psid); console.log(`[tender] шинэ туршигч нэмэгдлээ: ${psid}`); await admin(`🧪 Тендерийн туршилтын эрх нээгдлээ: ${psid}`); }
+    return true;
+  }
+  if (isTester(psid)) {
     const st0 = await S.getState(psid).catch((e) => ({ err: e.message }));
     console.log(`[tender] claims psid=${psid} payload=${JSON.stringify(payload)} text=${JSON.stringify(String(text || "").slice(0, 40))} enabled=${enabled()} state=${st0 && (st0.s || st0.err) || "-"}`);
   }
   // Туршилт: зөвшөөрөгдсөн psid «тендер» гэж бичвэл эхэлнэ (Make-д товч нэмэхээс өмнө)
-  if (!payload && /^\s*тендер\s*$/i.test(String(text || "")) && process.env.TENDER_ALLOW_PSIDS && allowed(psid)) {
+  if (!payload && /^\s*тендер\s*$/i.test(String(text || "")) && isTester(psid)) {
     const cur = await S.getState(psid).catch(() => null);
     if (!cur || !cur.s || cur.s === "tnd_left" || cur.s === "tnd_done") return true;
   }
-  if (payload === "TENDER" || payload.startsWith("TND_")) return enabled() || allowed(psid) && !!process.env.TENDER_ALLOW_PSIDS;
+  if (payload === "TENDER" || payload.startsWith("TND_")) return enabled() || isTester(psid);
   const st = await S.getState(psid).catch(() => null);
   if (!st || !st.s || !st.s.startsWith("tnd_") || st.s === "tnd_left") return false;
   if (MAIN.has(payload)) { if (!BUSY.has(st.s)) await S.setState(psid, { ...st, s: "tnd_left" }); return false; } // өөр үйлчилгээ сонгосон
@@ -56,7 +70,7 @@ async function enqueue(psid, kind, extra = {}) {
 }
 
 async function start(psid) {
-  if (!allowed(psid)) { await send(psid, "Тендерийн материал бэлтгэх үйлчилгээ тун удахгүй нээгдэнэ 🙏"); return toMenu(psid); }
+  if (!enabled() && !isTester(psid)) { await send(psid, "Тендерийн материал бэлтгэх үйлчилгээ тун удахгүй нээгдэнэ 🙏"); return toMenu(psid); }
   await S.clear(psid).catch(() => { });
   const url = uploadUrl(psid);
   await S.setState(psid, { s: "tnd_upload", url, conv: [] });
@@ -151,6 +165,8 @@ async function handle({ psid, text, payload, attachments }) {
   const atts = Array.isArray(attachments) ? attachments.filter((a) => a && !(a.payload && a.payload.sticker_id)) : [];
   let st = (await S.getState(psid)) || { s: "new" };
 
+  const tcode = String(process.env.TENDER_TEST_CODE || "").trim().toLowerCase();
+  if (!payload && tcode && text.toLowerCase() === tcode && !BUSY.has(st.s)) payload = "TENDER";
   if (!payload && /^\s*тендер\s*$/i.test(text) && (!st.s || st.s === "new" || st.s === "tnd_left" || st.s === "tnd_done")) payload = "TENDER";
   if (payload === "TENDER") { if (BUSY.has(st.s)) { await send(psid, "Таны тендерийн захиалгыг боловсруулж байна ⏳ Бэлэн болмогц мэдэгдэнэ."); return "ext"; } return start(psid); }
   if (payload === "TND_CANCEL" || (CANCEL.test(text) && !BUSY.has(st.s) && !["tnd_interview", "tnd_done"].includes(st.s))) {
@@ -280,4 +296,4 @@ async function onFailed(job, e) {
   await admin(/credit balance/i.test(e.message || "") ? "⚠️ Anthropic API кредит дууссан! Тендерийн захиалагч хүлээж байна." : `⚠️ Тендер ${job.kind} алдаа (${job.psid}): ${String(e.message).slice(0, 300)}`);
 }
 
-module.exports = { claims, handle, adminAction, isAdminPayload, onUploaded, onFailed, paid, allowed, MENU };
+module.exports = { isTester, claims, handle, adminAction, isAdminPayload, onUploaded, onFailed, paid, allowed, MENU };

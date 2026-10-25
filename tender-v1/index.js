@@ -12,7 +12,7 @@ router.use(require("./upload"));
 const jobs = new Map(), activeByPsid = new Map(), queue = []; let running = 0;
 const MAX_PARALLEL = Number(process.env.TENDER_MAX_PARALLEL || 1);
 const auth = (req, res, next) => (process.env.API_KEY && req.get("x-api-key") === process.env.API_KEY ? next() : res.status(401).json({ error: "unauthorized" }));
-const canRun = (psid) => process.env.TENDER_ENABLED === "1" || require("./flow").allowed(psid) && !!process.env.TENDER_ALLOW_PSIDS;
+const canRun = (psid) => process.env.TENDER_ENABLED === "1" || require("./flow").isTester(psid);
 
 async function yieldToOthers(job) {
   if (process.env.TENDER_YIELD === "0" || process.env.TENDER_MOCK === "1") return;
