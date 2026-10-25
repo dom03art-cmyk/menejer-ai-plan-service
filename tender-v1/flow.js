@@ -28,6 +28,10 @@ const enabled = () => process.env.TENDER_ENABLED === "1";
 // Энэ мессежийг тендерийн урсгал хүлээж авах уу
 async function claims(psid, payload, text) {
   payload = String(payload || "");
+  if (process.env.TENDER_ALLOW_PSIDS && allowed(psid)) {
+    const st0 = await S.getState(psid).catch((e) => ({ err: e.message }));
+    console.log(`[tender] claims psid=${psid} payload=${JSON.stringify(payload)} text=${JSON.stringify(String(text || "").slice(0, 40))} enabled=${enabled()} state=${st0 && (st0.s || st0.err) || "-"}`);
+  }
   // Туршилт: зөвшөөрөгдсөн psid «тендер» гэж бичвэл эхэлнэ (Make-д товч нэмэхээс өмнө)
   if (!payload && /^\s*тендер\s*$/i.test(String(text || "")) && process.env.TENDER_ALLOW_PSIDS && allowed(psid)) {
     const cur = await S.getState(psid).catch(() => null);

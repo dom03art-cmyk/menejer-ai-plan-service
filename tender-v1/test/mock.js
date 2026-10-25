@@ -13,6 +13,9 @@ function respond(task, user) {
   const c = process.env.TENDER_MOCK_CASE || "security";
   const d = load(CASES[c]);
   const tender = JSON.parse(JSON.stringify(d.tender));
+  // Жишээний огноог үргэлж ирээдүйд (бодит ТББ-ийн хугацаа өнгөрсөн ч тест ажиллана)
+  const fut = (d) => new Date(Date.now() + d * 864e5 + 8 * 3600e3).toISOString().slice(0, 10) + "T10:00:00+08:00";
+  tender.deadline = fut(10); tender.opening = fut(10);
   if (c === "expired") tender.deadline = "2026-01-05T10:00:00+08:00";
   if (task === "A1") {
     if (c === "office" && !/Багц 3/.test(user)) return { type: "goods", lots: [{ no: "1", name: "Цаас", budget: 30000000 }, { no: "2", name: "Хавтас", budget: 12000000 }, { no: "3", name: "Бичиг хэргийн жижиг материал", budget: 9900000 }], lot_found: false, tender: {} };
