@@ -116,7 +116,7 @@ async function offerPayment(psid, st) {
       const inv = await QP.createInvoice({ psid, amount: st.price, kind: "tender", description: "Менежер AI: тендерийн материал" });
       st.qpay = { no: inv.no, amount: inv.amount, short: inv.short || null }; await S.setState(psid, st);
       if (inv.qrUrl) await sendImage(psid, inv.qrUrl);
-      await send(psid, `💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц ТББ-г шинжилж эхэлнэ (10–25 минут). Дараа нь танаас хэрэгтэй мэдээллийг асууна.`, [["✅ Төлсөн, шалгах", "TND_QPCHECK"], CANCEL_BTN]);
+      await send(psid, `💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц ТББ-г шинжилж эхэлнэ (15–30 минут). Дараа нь танаас хэрэгтэй мэдээллийг асууна.`, [["✅ Төлсөн, шалгах", "TND_QPCHECK"], CANCEL_BTN]);
       return "ext";
     } catch (e) { console.warn("[tender] QPay:", e.message); await admin(`⚠️ Тендер: QPay нэхэмжлэх үүсгэж чадсангүй (${psid}): ${String(e.message).slice(0, 200)}`); }
   }
@@ -131,7 +131,7 @@ async function paid(psid, via) {
   if (!["tnd_pay", "tnd_payreview"].includes(st.s)) return false;
   if (via === "admin" && st.qpay && st.qpay.no) await require("../org-v1/qpay").cancelInvoice(st.qpay.no).catch(() => { });
   await S.setState(psid, { ...st, s: "tnd_analyzing", paidAt: Date.now(), paidVia: via });
-  await send(psid, `${via === "qpay" ? "QPay төлбөр амжилттай орлоо" : "Төлбөр баталгаажлаа"} ✅ ТББ-г уншиж, шаардлагуудыг задалж байна ⏳ 10–25 минут болно. Дууссаны дараа танаас хэрэгтэй мэдээллийг асууна.`);
+  await send(psid, `${via === "qpay" ? "QPay төлбөр амжилттай орлоо" : "Төлбөр баталгаажлаа"} ✅ ТББ-г уншиж, шаардлагуудыг задалж байна ⏳ 15–30 минут болно. Дууссаны дараа танаас хэрэгтэй мэдээллийг асууна.`);
   try { await enqueue(psid, "analyze"); await admin(`💳 Тендер: төлбөр ${via === "qpay" ? "QPay-ээр орлоо" : "баталгаажлаа"} ${fmtMoney(st.price || PRICE())} — шинжилгээ эхэллээ (${psid})`); }
   catch (e) { await admin(`⚠️ Тендер ${psid}: шинжилгээ эхлүүлж чадсангүй — ${e.message}`); await send(psid, "Төлбөр баталгаажлаа ✅ Боловсруулалт эхлэхэд түр саатал гарлаа, манай ажилтан удахгүй эхлүүлнэ."); }
   return true;
@@ -227,7 +227,7 @@ async function handle({ psid, text, payload, attachments }) {
       if (!require("./index").isActive(psid)) { try { await enqueue(psid, st.s === "tnd_analyzing" ? "analyze" : "compose"); } catch (e) { console.warn("[tender] сэргээх:", e.message); } }
       if (atts.length) { const n = await saveAttachments(psid, atts); if (n) { await send(psid, `${n} файл хүлээн авлаа ✅ Боловсруулалт дууссаны дараа ашиглана.`); return "ext"; } }
       if (text) { st.conv = [...(st.conv || []), { role: "Оролцогч", text: text.slice(0, 3000) }]; await S.setState(psid, st); }
-      await send(psid, st.s === "tnd_analyzing" ? "ТББ-г шинжилж байна ⏳ Дууссаны дараа асуултаа илгээнэ." : "Материалыг бэлтгэж байна ⏳ 15–30 минут болно. Бэлэн болмогц файлаар илгээнэ."); return "ext";
+      await send(psid, st.s === "tnd_analyzing" ? "ТББ-г шинжилж байна ⏳ Дууссаны дараа асуултаа илгээнэ." : "Материалыг бэлтгэж байна ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ."); return "ext";
 
     case "tnd_interview": {
       if (atts.length) { const n = await saveAttachments(psid, atts); await send(psid, n ? `📎 ${n} баримт хүлээн авлаа. Бусдыг нь илгээж дуусаад «✅ Бэлэн» дарна уу.` : "Файлыг татаж чадсангүй. Холбоосоор илгээнэ үү:\n" + (st.url || uploadUrl(psid)), READY_BTN); if (!text) return "ext"; }
@@ -247,7 +247,7 @@ async function handle({ psid, text, payload, attachments }) {
           }
         }
         await S.setState(psid, { ...st, s: "tnd_composing" });
-        await send(psid, "Материалыг бэлтгэж эхэллээ ⏳ 15–30 минут болно. Бэлэн болмогц файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.");
+        await send(psid, "Материалыг бэлтгэж эхэллээ ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.");
         await enqueue(psid, "compose"); return "ext";
       }
       await send(psid, "Хариугаа бичих эсвэл бүгдийг илгээсэн бол «✅ Бэлэн» дарна уу.", READY_BTN); return "ext";

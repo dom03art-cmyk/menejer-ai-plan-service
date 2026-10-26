@@ -52,12 +52,13 @@ function addFile(psid, { name, mime, buf, phase = "tbb", pages = null }) {
     if (!Buffer.isBuffer(buf) || !buf.length) return { ok: false, error: "Файл хоосон байна" };
     if (buf.length > LIMITS.maxFileBytes) return { ok: false, error: `Файл хэт том (${(buf.length / 1048576).toFixed(1)}MB). Нэг файл 25MB хүртэл.` };
     const list = await getJSON(K.files(psid), []);
-    const dup = list.find((f) => f.name === name && f.size === buf.length);
+    const sha = crypto.createHash("sha1").update(buf).digest("hex");
+    const dup = list.find((f) => (f.sha && f.sha === sha) || (f.name === name && f.size === buf.length));
     if (dup) return { ok: true, file: dup, duplicate: true };
     if (list.length >= LIMITS.maxFiles) return { ok: false, error: `Нэг захиалгад ${LIMITS.maxFiles} хүртэл файл. Илүүг нь нэг PDF болгож нэгтгэнэ үү.` };
     if (list.reduce((s, f) => s + f.size, 0) + buf.length > LIMITS.maxTotalBytes) return { ok: false, error: "Нийт материал 120MB-аас хэтэрлээ." };
     const id = crypto.randomBytes(6).toString("hex");
-    const file = { id, name: String(name || "файл").slice(0, 200), mime: String(mime || ""), size: buf.length, phase, pages, at: new Date().toISOString() };
+    const file = { id, sha, name: String(name || "файл").slice(0, 200), mime: String(mime || ""), size: buf.length, phase, pages, at: new Date().toISOString() };
     await putBuf(K.file(psid, id), buf);
     list.push(file); await setJSON(K.files(psid), list);
     return { ok: true, file };
