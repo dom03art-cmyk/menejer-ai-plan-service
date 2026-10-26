@@ -24,6 +24,22 @@ const FIX_DATA = new Set(["REQ_UNASSESSED", "REQ_BAD_STATUS", "STATUS_CONFLICT",
 const FIX_TEXT = new Set(["PROMISE_UNMET", "LETTER_EMPTY", "METHODOLOGY_MISSING"]);
 const GAP_TEXT = { COMPANY_NAME: "Компанийн бүтэн нэр", COMPANY_REG_NO: "Компанийн регистрийн дугаар", COMPANY_ADDRESS: "Компанийн хаяг", SIGNATORY: "Тендерт гарын үсэг зурах хүний нэр, албан тушаал", VALIDITY_MISSING: "Тендер хүчинтэй байх хугацаа" };
 
+// Claude-ийн шаардлагын төлвийг хөдөлгүүрийн хэлбэрт оруулна: тоон шалгуурын төлвийг код тооцно (Claude-ийнхыг хасна),
+// ok|missing|fail-аас өөр утгыг тайлбартай нь хадгалж «missing» болгоно. Тоо, баримтыг өөрчлөхгүй.
+function normalizeStatus(base) {
+  const c = base.customer || {}, t = base.tender || {};
+  const numeric = new Set((t.numeric_criteria || []).map((n) => n.req_id));
+  const MAP = { ok: "ok", yes: "ok", pass: "ok", met: "ok", "хангана": "ok", missing: "missing", partial: "missing", unknown: "missing", pending: "missing", "дутуу": "missing", fail: "fail", no: "fail", "хангахгүй": "fail" };
+  const fixed = [];
+  c.requirement_status = (c.requirement_status || []).filter((x) => x && x.req_id && !numeric.has(x.req_id)).map((x) => {
+    const k = String(x.status || "").trim().toLowerCase(), v = MAP[k] || "missing";
+    if (v !== x.status) fixed.push(`${x.req_id}:${x.status}→${v}`);
+    return { ...x, status: v };
+  });
+  base.customer = c;
+  return fixed;
+}
+
 async function guard(text) { if (process.env.TENDER_MOCK === "1") return; const g = await checkContent(String(text || "").slice(0, 15000)); if (!g.allowed) throw blockedError(g); }
 
 // ===================== A =====================
@@ -130,6 +146,7 @@ async function runCompose(job, log = console.log) {
   Object.assign(base, { sections: t.sections || {}, letters: t.letters || [], drafts: t.drafts || [], attachments: t.attachments || [] });
 
   step("B4/5 хөдөлгүүр, шалгалт");
+  { const fx = normalizeStatus(base); if (fx.length) log(`[tender ${job.id}] төлөв хэвшүүлэв: ${fx.slice(0, 10).join(", ")}`); }
   let r = await buildPackage(base);
   for (let i = 0; i < 2 && r.qc.blocked; i++) {
     const blocks = r.qc.issues.filter((x) => x.level === "block");
@@ -138,6 +155,7 @@ async function runCompose(job, log = console.log) {
     log(`[tender ${job.id}] засах оролдлого ${i + 1}: ${[...dataFix, ...textFix].map((x) => x.code).join(", ")}`);
     if (dataFix.length) { c = await AI.customerData(text, base, conv, dataFix.map((x) => `${x.code}: ${x.msg}`).join("\n")); base.customer = (c && c.customer) || base.customer; }
     if (textFix.length || dataFix.length) { t = await AI.texts(text, base, conv, textFix.map((x) => `${x.code}: ${x.msg}`).join("\n")); Object.assign(base, { sections: t.sections || base.sections, letters: t.letters || base.letters, drafts: t.drafts || base.drafts, attachments: t.attachments || base.attachments }); }
+    normalizeStatus(base);
     r = await buildPackage(base);
   }
   await S.patchCase(psid, { data: base, report: r.report, composedAt: Date.now() });
@@ -180,4 +198,4 @@ async function runCompose(job, log = console.log) {
   job.outcome = "delivered"; return job;
 }
 
-module.exports = { runAnalyze, runCompose, nowMN, convText };
+module.exports = { normalizeStatus, runAnalyze, runCompose, nowMN, convText };
