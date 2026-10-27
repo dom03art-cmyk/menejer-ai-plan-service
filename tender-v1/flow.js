@@ -15,6 +15,7 @@ const BASE = () => process.env.PUBLIC_URL || "https://menejer-ai-plan-service.on
 const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"], ["Тендерийн материал", "TENDER"]];
 const MAIN = new Set(["BIZ_PROJECT", "MKT_PLAN", "ORG_REPORT", "ORG_PLAN", "FLOW_MENU", "FLOW_REV"]);
 const BUSY = new Set(["tnd_analyzing", "tnd_composing"]);
+// tnd_terms — үйлчилгээний нөхцөл зөвшөөрөх (төлбөрөөс өмнө); tnd_slots — хуудсанд материалаа бүрдүүлж байна
 const CANCEL_BTN = ["Цуцлах", "TND_CANCEL"];
 const CANCEL = /^(цуцла|болих|буцах|cancel|stop)/i;
 
@@ -116,7 +117,7 @@ async function offerPayment(psid, st) {
       const inv = await QP.createInvoice({ psid, amount: st.price, kind: "tender", description: "Менежер AI: тендерийн материал" });
       st.qpay = { no: inv.no, amount: inv.amount, short: inv.short || null }; await S.setState(psid, st);
       if (inv.qrUrl) await sendImage(psid, inv.qrUrl);
-      await send(psid, `💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц ТББ-г шинжилж эхэлнэ (15–30 минут). Дараа нь танаас хэрэгтэй мэдээллийг асууна.`, [["✅ Төлсөн, шалгах", "TND_QPCHECK"], CANCEL_BTN]);
+      await send(psid, `💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц ТББ-г шинжилж эхэлнэ (15–30 минут). Дараа нь баримт, мэдээллээ оруулах нүднүүд таны хуудсанд гарна.`, [["✅ Төлсөн, шалгах", "TND_QPCHECK"], CANCEL_BTN]);
       return "ext";
     } catch (e) { console.warn("[tender] QPay:", e.message); await admin(`⚠️ Тендер: QPay нэхэмжлэх үүсгэж чадсангүй (${psid}): ${String(e.message).slice(0, 200)}`); }
   }
@@ -131,7 +132,7 @@ async function paid(psid, via) {
   if (!["tnd_pay", "tnd_payreview"].includes(st.s)) return false;
   if (via === "admin" && st.qpay && st.qpay.no) await require("../org-v1/qpay").cancelInvoice(st.qpay.no).catch(() => { });
   await S.setState(psid, { ...st, s: "tnd_analyzing", paidAt: Date.now(), paidVia: via });
-  await send(psid, `${via === "qpay" ? "QPay төлбөр амжилттай орлоо" : "Төлбөр баталгаажлаа"} ✅ ТББ-г уншиж, шаардлагуудыг задалж байна ⏳ 15–30 минут болно. Дууссаны дараа танаас хэрэгтэй мэдээллийг асууна.`);
+  await send(psid, `${via === "qpay" ? "QPay төлбөр амжилттай орлоо" : "Төлбөр баталгаажлаа"} ✅ ТББ-г уншиж, шаардлагуудыг задалж байна ⏳ 15–30 минут болно. Дуусмагц бүрдүүлэх материалын нүднүүд таны хуудсанд гарч, энд мэдэгдэнэ.`);
   try { await enqueue(psid, "analyze"); await admin(`💳 Тендер: төлбөр ${via === "qpay" ? "QPay-ээр орлоо" : "баталгаажлаа"} ${fmtMoney(st.price || PRICE())} — шинжилгээ эхэллээ (${psid})`); }
   catch (e) { await admin(`⚠️ Тендер ${psid}: шинжилгээ эхлүүлж чадсангүй — ${e.message}`); await send(psid, "Төлбөр баталгаажлаа ✅ Боловсруулалт эхлэхэд түр саатал гарлаа, манай ажилтан удахгүй эхлүүлнэ."); }
   return true;
@@ -156,6 +157,26 @@ async function saveAttachments(psid, atts) {
   }
   if (errs.length) await send(psid, `⚠️ Хүлээж аваагүй: ${errs.join("; ")}`);
   return n;
+}
+
+const TERMS = (price) => `📋 Үйлчилгээний нөхцөл${price ? ` — ${fmtMoney(price)}` : ""}
+
+• Бид ТББ-ийн шаардлагыг шалгаж, танд юу дутуу, юуг хангахгүйг шударгаар хэлнэ. Маягт, үнийн санал, аргачлал, албан бичгийг бэлтгэнэ.
+• Танай байгууллага шаардлага хангахгүй гэж гарсан ч шалгах жагсаалт, материал бэлтгэх ажил хийгдсэн тул төлбөр буцаагдахгүй.
+• Тендерт тэнцэх, ялахыг бид баталгаажуулахгүй. Гэрчилгээ, тодорхойлолт зэрэг бусдын баримтыг зохиохгүй.
+• Тендерийг tender.gov.mn-д та өөрөө илгээнэ. 1 удаа үнэгүй дахин гаргах эрхтэй.
+
+Зөвшөөрч байвал доорх товчийг дарна уу.`;
+
+// Хуудасны «Материал гаргах» товч (upload.js) → B шат
+async function startCompose(psid, { reds } = {}) {
+  const st = (await S.getState(psid)) || {};
+  if (BUSY.has(st.s)) throw new Error("Материалыг бэлтгэж байна");
+  if ((st.runs || 0) >= MAX_RUNS()) { await admin(`ℹ️ Тендер ${psid}: дахин боловсруулах хязгаарт хүрлээ (${st.runs}).`); throw new Error("Энэ захиалгын боловсруулах эрх дууслаа. Манай ажилтан тантай холбогдоно."); }
+  await S.setState(psid, { ...st, s: "tnd_composing", forcedReds: reds || null, composeAt: Date.now() });
+  await enqueue(psid, "compose");
+  const n = reds ? reds.attach.length + reds.data.length + reds.fail.length : 0;
+  await send(psid, `Материалыг бэлтгэж эхэллээ ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ.${n ? ` (${n} зүйл дутуу байгааг мэдэж байж гаргахыг сонгосон.)` : ""}`);
 }
 
 const READY_BTN = [["✅ Бэлэн", "TND_READY"], CANCEL_BTN];
@@ -189,9 +210,14 @@ async function handle({ psid, text, payload, attachments }) {
       const lot = payload === "TND_ONELOT" ? null : text.slice(0, 200);
       if (!lot && payload !== "TND_ONELOT") { await send(psid, "Багцын дугаар эсвэл нэрийг бичнэ үү.", [["Ганц багцтай", "TND_ONELOT"], CANCEL_BTN]); return "ext"; }
       st.lot = lot;
+      if (!st.paidRetry) { await S.setState(psid, { ...st, s: "tnd_terms" }); await send(psid, TERMS(st.price), [["✅ Зөвшөөрч, төлөх", "TND_AGREE"], CANCEL_BTN]); return "ext"; }
       if (st.paidRetry) { await S.setState(psid, { ...st, s: "tnd_analyzing" }); await send(psid, "Хүлээн авлаа ✅ ТББ-г шинжилж байна ⏳ 10–25 минут болно."); await enqueue(psid, "analyze"); return "ext"; }
       return offerPayment(psid, st);
     }
+
+    case "tnd_terms":
+      if (payload === "TND_AGREE") { st.termsAt = Date.now(); return offerPayment(psid, st); }
+      await send(psid, TERMS(st.price), [["✅ Зөвшөөрч, төлөх", "TND_AGREE"], CANCEL_BTN]); return "ext";
 
     case "tnd_pay": {
       if (payload === "TND_QPCHECK" && st.qpay) {
@@ -227,31 +253,12 @@ async function handle({ psid, text, payload, attachments }) {
       if (!require("./index").isActive(psid)) { try { await enqueue(psid, st.s === "tnd_analyzing" ? "analyze" : "compose"); } catch (e) { console.warn("[tender] сэргээх:", e.message); } }
       if (atts.length) { const n = await saveAttachments(psid, atts); if (n) { await send(psid, `${n} файл хүлээн авлаа ✅ Боловсруулалт дууссаны дараа ашиглана.`); return "ext"; } }
       if (text) { st.conv = [...(st.conv || []), { role: "Оролцогч", text: text.slice(0, 3000) }]; await S.setState(psid, st); }
-      await send(psid, st.s === "tnd_analyzing" ? "ТББ-г шинжилж байна ⏳ Дууссаны дараа асуултаа илгээнэ." : "Материалыг бэлтгэж байна ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ."); return "ext";
+      await send(psid, st.s === "tnd_analyzing" ? "ТББ-г шинжилж байна ⏳ Дуусмагц бүрдүүлэх материалын нүднүүд хуудсанд гарна." : "Материалыг бэлтгэж байна ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ."); return "ext";
 
-    case "tnd_interview": {
-      if (atts.length) { const n = await saveAttachments(psid, atts); await send(psid, n ? `📎 ${n} баримт хүлээн авлаа. Бусдыг нь илгээж дуусаад «✅ Бэлэн» дарна уу.` : "Файлыг татаж чадсангүй. Холбоосоор илгээнэ үү:\n" + (st.url || uploadUrl(psid)), READY_BTN); if (!text) return "ext"; }
-      if (text && !payload) { st.conv = [...(st.conv || []), { role: "Оролцогч", text: text.slice(0, 4000) }]; await S.setState(psid, st); await send(psid, "✔️ Хүлээн авлаа. Үргэлжлүүлэн бичих эсвэл бүгдийг илгээсэн бол «✅ Бэлэн» дарна уу.", READY_BTN); return "ext"; }
-      if (payload === "TND_READY" || payload === "TND_GO") {
-        if ((st.runs || 0) >= MAX_RUNS()) { await admin(`ℹ️ Тендер ${psid}: дахин боловсруулах хязгаарт хүрлээ (${st.runs}).`); await send(psid, "Энэ захиалгын боловсруулах эрх дууслаа. Манай ажилтан тантай холбогдоно."); return "ext"; }
-        if (!(st.conv || []).some((m) => m.role === "Оролцогч") && !(await S.listFiles(psid)).some((f) => f.phase === "bidder")) { await send(psid, "Та асуултад хариулаагүй байна. Мэдээллээ бичээд «✅ Бэлэн» дарна уу.", READY_BTN); return "ext"; }
-        if (payload === "TND_READY" && !(st.asked >= 1)) {
-          const kase = await S.getCase(psid);
-          let gap = { missing: [] };
-          try { gap = await require("./ai").gapCheck((kase && kase.q && kase.q.critical) || [], (kase && kase.q && kase.q.questions) || [], require("./pipeline").convText(st.conv)); } catch (e) { console.warn("[tender] gap:", e.message); }
-          const miss = (gap.missing || []).slice(0, 8);
-          if (miss.length) {
-            await S.setState(psid, { ...st, asked: 1 });
-            await send(psid, `Материал гаргахад дараах мэдээлэл хэрэгтэй хэвээр байна:\n\n${miss.map((x, i) => `${i + 1}. ${x}`).join("\n")}\n\nБичээд «✅ Бэлэн» дарна уу. Эсвэл одоогийн мэдээллээр гаргаж болно — дутууг [ДУТУУ] гэж тэмдэглэнэ.`, [["✅ Бэлэн", "TND_READY"], ["Ингээд гарга", "TND_GO"], CANCEL_BTN]);
-            return "ext";
-          }
-        }
-        await S.setState(psid, { ...st, s: "tnd_composing" });
-        await send(psid, "Материалыг бэлтгэж эхэллээ ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.");
-        await enqueue(psid, "compose"); return "ext";
-      }
-      await send(psid, "Хариугаа бичих эсвэл бүгдийг илгээсэн бол «✅ Бэлэн» дарна уу.", READY_BTN); return "ext";
-    }
+    case "tnd_slots":
+    case "tnd_interview":
+      if (atts.length) { await send(psid, `Баримтаа энэ хуудасны тохирох нүдэнд оруулна уу — нүд бүр автоматаар шалгагдаж, улаан/шар/ногооноор харагдана:\n${st.url || uploadUrl(psid)}`, [CANCEL_BTN]); return "ext"; }
+      await send(psid, `Бүрдүүлэх материалаа энэ хуудсанд оруулаад «📄 Материал гаргах» товчийг дарна уу:\n${st.url || uploadUrl(psid)}`, [CANCEL_BTN]); return "ext";
 
     case "tnd_done": {
       if (payload === "TND_NEWTENDER") {
@@ -260,13 +267,6 @@ async function handle({ psid, text, payload, attachments }) {
         const url = uploadUrl(psid);
         await S.setState(psid, { s: "tnd_upload", url, conv: [], paidRetry: true, retried: true, price: st.price, paidAt: st.paidAt });
         await send(psid, `📄 Шинэ тендерийн ТББ-гээ (tender.gov.mn-ээс татсан PDF/Word) энэ холбоосоор илгээгээд «Дууслаа» дарна уу. Дахин төлөх шаардлагагүй.\n\n⚠️ Эцсийн хугацаа нь дор хаяж 3–5 ажлын өдрийн дараа байгаа тендер сонгоорой.\n\n${url}`, [CANCEL_BTN]);
-        return "ext";
-      }
-      if (payload === "TND_RERUN") {
-        const free = (st.delivered || 0) <= 1 && Date.now() - (st.deliveredAt || 0) < RERUN_DAYS * 864e5;
-        if (st.final || !free) { await S.setState(psid, { ...st, s: "tnd_left" }); await send(psid, st.final ? "Энэ захиалгыг дахин гаргах боломжгүй." : "Үнэгүй дахин гаргах эрх ашиглагдсан эсвэл хугацаа дууссан. Шинэ тендерт «Тендерийн материал» товчоор захиална уу."); return toMenu(psid); }
-        await S.setState(psid, { ...st, s: "tnd_interview", asked: 1 });
-        await send(psid, "Нэмэх, засах мэдээллээ бичнэ үү (шинэ баримт байвал энд илгээж болно). Дуусаад «✅ Бэлэн» дарна уу.", READY_BTN);
         return "ext";
       }
       await S.setState(psid, { ...st, s: "tnd_left" }); return toMenu(psid);
@@ -299,11 +299,11 @@ try {
 // Шинжилгээ / материал дууссаны дараа (index.js дуудна) — алдаа гарвал
 async function onFailed(job, e) {
   const st = (await S.getState(job.psid)) || {};
-  const back = job.kind === "compose" ? "tnd_interview" : st.s;
+  const back = job.kind === "compose" ? "tnd_slots" : st.s;
   await S.setState(job.psid, { ...st, s: back });
   if (e.status === "blocked") { await send(job.psid, require("../plan-v2/guard").CUSTOMER_MSG); await admin(`⛔ Тендер захиалгыг хаалаа (${job.psid}): ${String(e.message).slice(0, 300)}`); return; }
   await send(job.psid, "Уучлаарай, боловсруулахад техникийн саатал гарлаа. Манай ажилтан тантай удахгүй холбогдоно.");
   await admin(/credit balance/i.test(e.message || "") ? "⚠️ Anthropic API кредит дууссан! Тендерийн захиалагч хүлээж байна." : `⚠️ Тендер ${job.kind} алдаа (${job.psid}): ${String(e.message).slice(0, 300)}`);
 }
 
-module.exports = { isTester, claims, handle, adminAction, isAdminPayload, onUploaded, onFailed, paid, allowed, MENU };
+module.exports = { startCompose, TERMS, isTester, claims, handle, adminAction, isAdminPayload, onUploaded, onFailed, paid, allowed, MENU };

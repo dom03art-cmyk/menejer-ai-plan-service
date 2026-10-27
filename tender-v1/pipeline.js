@@ -1,6 +1,6 @@
 // Тендерийн хоёр шат:
-//   A (analyze) — төлбөр баталгаажсаны дараа: файл унших → ТББ задлах (A1) → асуулт (A2) → оролцогчид товч + асуулт илгээх
-//   B (compose) — оролцогч хариулж «Бэлэн» дарсны дараа: өгөгдөл (B1) → текст (B2) → хөдөлгүүр → (засах оролдлого) → хүргэх
+//   A (analyze) — төлбөр баталгаажсаны дараа: файл унших → ТББ задлах (A1) → нүдний жагсаалт (A2S) → оролцогчид холбоос илгээх
+//   B (compose) — оролцогч хуудсанд «Материал гаргах» дарсны дараа: маягт → өгөгдөл (B1) → текст (B2) → хөдөлгүүр → хүргэх
 // Бусад модулийн (plan-v2, marketing-v1, org-v1) төлөвт хүрэхгүй; зөвхөн тэдний функцийг уншиж ашиглана.
 const S = require("./store");
 const AI = require("./ai");
@@ -109,83 +109,66 @@ async function runAnalyze(job, log = console.log) {
     job.outcome = passed ? "deadline_passed" : "works_like"; return job;
   }
 
-  step("A3/4 асуулт бэлтгэж байна");
-  const q = await AI.questions(text, base.tender, convText(st.conv));
-  const qs = (q.questions || []).slice(0, 16);
-  await S.patchCase(psid, { base, q });
+  step("A3/4 бүрдүүлэх материалын жагсаалт");
+  const plan = await AI.slotPlan(text, base.tender);
+  const SL = require("./slots");
+  const slots = SL.buildSlots(base, plan.file_slots || [], plan.extra_fields || []);
+  await S.patchCase(psid, { base, plan, slots, values: (kaseValues(await S.getCase(psid))) });
 
-  step("A4/4 оролцогчид илгээж байна");
-  const link = job.uploadUrl || st.url || "";
-  const known = (q.known || []).length ? `\n\n📌 Илгээсэн баримтаас мэдсэн:\n${q.known.map((x) => "• " + x).join("\n")}` : "";
-  await send(psid, `📄 ${a.brief || tender.name}${skipped.length ? `\n\n⚠️ Уншиж чадаагүй файл: ${skipped.map((f) => `${f.name} (${f.note})`).join("; ")}` : ""}${q.warning ? `\n\n❗ ${q.warning}` : ""}${known}`);
-  await send(psid, `✍️ Материал бэлтгэхэд дараах мэдээлэл хэрэгтэй. Хариугаа энд бичнэ үү (хэд хэдэн мессежээр ч болно):\n\n${qs.join("\n")}`);
-  const docsAsk = (q.docs || []).length ? `📎 Дараах баримтуудыг энэ холбоосоор илгээнэ үү (зураг, PDF, Word):\n${q.docs.map((x) => "• " + x).join("\n")}\n\n${link}\n\n` : `📎 Баримт (гэрчилгээ, санхүүгийн тайлан, гэрээ, каталог) байвал энэ холбоосоор илгээнэ үү:\n${link}\n\n`;
-  await send(psid, `${docsAsk}Бүх хариу, баримтаа илгээсний дараа «✅ Бэлэн» товчийг дарна уу. Мэдэхгүй зүйлээ «мэдэхгүй» гэж бичиж болно — материалд [ДУТУУ] гэж тэмдэглээд, дараа нь нөхөх жагсаалтад оруулна.`, [["✅ Бэлэн", "TND_READY"], ["Цуцлах", "TND_CANCEL"]]);
-  await S.setState(psid, { ...st, s: "tnd_interview", conv: [...(st.conv || []), { role: "Менежер AI", text: `Асуулт:\n${qs.join("\n")}` }], asked: 0 });
-  job.outcome = "questions"; return job;
+  step("A4/4 оролцогчид мэдэгдэж байна");
+  const link = st.url || job.uploadUrl || "";
+  const brief = (plan.brief_items || []).length ? plan.brief_items.map((x) => "• " + x).join("\n") : (a.brief || tender.name);
+  await send(psid, `📄 ТББ-г уншиж дууслаа:\n${brief}${skipped.length ? `\n\n⚠️ Уншиж чадаагүй файл: ${skipped.map((f) => `${f.name} (${f.note})`).join("; ")}` : ""}${plan.warning ? `\n\n❗ ${plan.warning}` : ""}
+
+✍️ Одоо энэ холбоосыг нээгээд тендерт шаардсан баримт, мэдээллээ нүд бүрт оруулна уу (${slots.filter((x) => x.kind === "file").length} баримт, ${slots.filter((x) => x.kind !== "file").length} мэдээлэл):
+${link}
+
+🔴 улаан — дутуу эсвэл буруу, 🟡 шар — анхаарах, 🟢 ногоон — бэлэн. Бүрдээгүй баримтаа хожим өөрөө хавсаргах бол улаан нүдтэй байхад ч «Материал гаргах» товчийг дарж болно.`);
+  await S.setState(psid, { ...st, s: "tnd_slots" });
+  job.outcome = "slots"; return job;
 }
+// Өмнө оруулсан утгыг (дахин шинжилгээнд) хадгална
+function kaseValues(k) { return (k && k.values) || {}; }
 
 // ===================== B =====================
 async function runCompose(job, log = console.log) {
   const { psid } = job, step = (s) => { job.step = s; log(`[tender ${job.id}] ${s}`); };
   const st = (await S.getState(psid)) || {}, kase = await S.getCase(psid);
-  if (!kase || !kase.base) throw new Error("Шинжилгээний үр дүн алга (хугацаа дууссан байж магадгүй)");
-  const conv = convText(st.conv);
-  await guard(conv);
-  step("B1/5 файл уншиж байна");
-  const { docs, files } = await readAll(psid, { log, mock: job.mockRead });
-  const text = CX.composeContext(CX.fitDocs(docs).docs, joinDocs);
+  if (!kase || !kase.base || !kase.slots) throw new Error("Шинжилгээний үр дүн алга (хугацаа дууссан байж магадгүй)");
+  const SL = require("./slots");
+  const ev = SL.evaluate(kase.slots, kase.values || {}, { tender: kase.base.tender, deadline: kase.base.tender.deadline });
+  const form = SL.formText(kase.slots, kase.values || {}, ev.status);
+  await guard(form);
   const base = JSON.parse(JSON.stringify(kase.base));
   base.now = nowMN();
 
-  step("B2/5 оролцогчийн мэдээлэл");
-  let c = await AI.customerData(text, base, conv);
+  step("B1/4 оролцогчийн мэдээлэл");
+  let c = await AI.customerData(form, base, form);
   base.customer = (c && c.customer) || {};
-  step("B3/5 текст бичиж байна");
-  let t = await AI.texts(text, base, conv);
+  step("B2/4 текст бичиж байна");
+  let t = await AI.texts(form, base, form);
   Object.assign(base, { sections: t.sections || {}, letters: t.letters || [], drafts: t.drafts || [], attachments: t.attachments || [] });
 
-  step("B4/5 хөдөлгүүр, шалгалт");
+  step("B3/4 хөдөлгүүр, шалгалт");
   { const fx = normalizeStatus(base); if (fx.length) log(`[tender ${job.id}] төлөв хэвшүүлэв: ${fx.slice(0, 10).join(", ")}`); }
   let r = await buildPackage(base);
-  for (let i = 0; i < 2 && r.qc.blocked; i++) {
-    const blocks = r.qc.issues.filter((x) => x.level === "block");
+  // Claude-ийн өөрийн алдааг (оролцогчийн дутуу мэдээлэл биш) 1 удаа засуулна
+  { const blocks = r.qc.issues.filter((x) => x.level === "block");
     const dataFix = blocks.filter((x) => FIX_DATA.has(x.code)), textFix = blocks.filter((x) => FIX_TEXT.has(x.code));
-    if (!dataFix.length && !textFix.length) break;
-    log(`[tender ${job.id}] засах оролдлого ${i + 1}: ${[...dataFix, ...textFix].map((x) => x.code).join(", ")}`);
-    if (dataFix.length) { c = await AI.customerData(text, base, conv, dataFix.map((x) => `${x.code}: ${x.msg}`).join("\n")); base.customer = (c && c.customer) || base.customer; }
-    if (textFix.length || dataFix.length) { t = await AI.texts(text, base, conv, textFix.map((x) => `${x.code}: ${x.msg}`).join("\n")); Object.assign(base, { sections: t.sections || base.sections, letters: t.letters || base.letters, drafts: t.drafts || base.drafts, attachments: t.attachments || base.attachments }); }
-    normalizeStatus(base);
-    r = await buildPackage(base);
-  }
+    if (dataFix.length || textFix.length) {
+      log(`[tender ${job.id}] засах оролдлого: ${[...dataFix, ...textFix].map((x) => x.code).join(", ")}`);
+      if (dataFix.length) { c = await AI.customerData(form, base, form, dataFix.map((x) => `${x.code}: ${x.msg}`).join("\n")); base.customer = (c && c.customer) || base.customer; }
+      if (textFix.length) { t = await AI.texts(form, base, form, textFix.map((x) => `${x.code}: ${x.msg}`).join("\n")); Object.assign(base, { sections: t.sections || base.sections, letters: t.letters || base.letters, drafts: t.drafts || base.drafts, attachments: t.attachments || base.attachments }); }
+      normalizeStatus(base);
+    } }
+  // Оролцогч хуудсанд улаан нүдийг мэдсээр байж «Материал гаргах» дарсан тул дутуу/хангахгүй байсан ч гаргана
+  r = await buildPackage(base, { force: true });
   await S.patchCase(psid, { data: base, report: r.report, composedAt: Date.now() });
   job.report = r.report;
 
-  step("B5/5 илгээж байна");
+  step("B4/4 илгээж байна");
   const T = base.tender, dl = deadlineText(T.deadline);
-  if (r.report.excel_bad) {
-    await admin(`⚠️ Тендер (${psid}): Excel тулгалт зөрсөн — ${r.report.reason}`);
-    throw new Error(r.report.reason);
-  }
-  const checklist = r.files[0];
-  if (r.qc.decision === "nogo") {
-    await send(psid, r.chat);
-    await sendFile(psid, checklist.buf, "01-shalgakh-jagsaalt.docx", checklist.mime);
-    await send(psid, "Шалгах жагсаалтад шаардлага бүрийн төлөв, хууль ёсны боломжит арга бий. Мэдээлэл буруу байсан бол засаж бичээд «🔄 Дахин шалгах» товчийг дарна уу.", [["🔄 Дахин шалгах", "TND_READY"], ["Цэс", "FLOW_MENU"]]);
-    await S.setState(psid, { ...st, s: "tnd_interview", runs: (st.runs || 0) + 1 });
-    job.outcome = "nogo"; return job;
-  }
-  if (!r.report.delivered) {
-    const blocks = r.qc.issues.filter((x) => x.level === "block");
-    const gaps = blocks.filter((x) => BIDDER_GAP.has(x.code) || x.code.startsWith("COMPANY_") || x.code === "DEADLINE_PASSED");
-    const other = blocks.filter((x) => !gaps.includes(x));
-    if (other.length) await admin(`⚠️ Тендер (${psid}): засагдаагүй алдаа — ${other.map((x) => `${x.code}: ${x.msg}`).join(" | ").slice(0, 900)}`);
-    if (!gaps.length) throw new Error("Материал шалгалтад тэнцээгүй: " + other.map((x) => x.code).join(", "));
-    await send(psid, `Материалыг дуусгахад дараах мэдээлэл дутуу байна:\n\n${gaps.map((x, i) => `${i + 1}. ${GAP_TEXT[x.code] || x.msg}`).join("\n")}\n\nЭнд бичээд «✅ Бэлэн» товчийг дахин дарна уу.`, [["✅ Бэлэн", "TND_READY"], ["Цуцлах", "TND_CANCEL"]]);
-    await S.setState(psid, { ...st, s: "tnd_interview", runs: (st.runs || 0) + 1 });
-    job.outcome = "gaps"; return job;
-  }
-  // Хүргэлт
+  if (r.report.excel_bad) { await admin(`⚠️ Тендер (${psid}): Excel тулгалт зөрсөн — ${r.report.reason}`); throw new Error(r.report.reason); }
   await send(psid, r.chat);
   const names = { "01": "01-shalgakh-jagsaalt", "02": "02-tenderiin-material", "03": "03-unii-zadargaa" };
   for (const f of r.files) {
@@ -193,9 +176,13 @@ async function runCompose(job, log = console.log) {
     const fn = names[pre] ? `${names[pre]}.${ext}` : `${pre}-${ascii(f.name.slice(3).replace(/\.\w+$/, ""))}.${ext}`;
     try { await sendFile(psid, f.buf, fn, f.mime); } catch (e) { log(`[tender ${job.id}] файл илгээж чадсангүй ${fn}: ${e.message}`); }
   }
-  await send(psid, `✅ Тендерийн материал бэлэн боллоо.\n\n• 01 — Шалгах жагсаалт (танд зориулсан, тендерт хавсаргахгүй)\n• 02 — Тендерийн материал: маягтууд, албан бичиг${base.meta.type === "services" ? ", ажлын аргачлал" : ", техникийн санал"} (Word — засаж болно)\n• 03 — Үнийн задаргаа (Excel, томьёотой)${r.files.length > 3 ? "\n• 04 — Таны батлах баримтын ТӨСӨЛ" : ""}\n\n⚠️ Анхаарах:\n1. [ДУТУУ] гэсэн хэсгийг нөхөж, бүх тоо, нэрийг шалгана уу. Тендер илгээх маягтаар мэдээллийн үнэнийг та хариуцна.\n2. Тендерийг tender.gov.mn-д та өөрөө тоон гарын үсгээр илгээнэ. Эцсийн хугацаа: ${dl || "ТББ-ийг харна уу"} — сүүлийн мөчид бүү үлдээгээрэй.\n3. Бид тендер ялна гэж баталгаа өгөхгүй.\n\nМэдээлэл нэмж, засуулах бол бичээд «🔄 Дахин гаргах» товчийг дарна уу (1 удаа үнэгүй).`, [["🔄 Дахин гаргах", "TND_RERUN"], ["Цэс", "FLOW_MENU"]]);
+  const R = SL.reds(kase.slots, ev.status);
+  const warnFail = r.qc.decision === "nogo" || R.fail.length ? `\n\n❗ Танай байгууллага зарим шаардлагыг хангахгүй байна (шалгах жагсаалтыг үзнэ үү). Ийм тохиолдолд тендерээс хасагдах эрсдэл өндөр.` : "";
+  const warnAttach = R.attach.length ? `\n\n📎 Та өөрөө хавсаргах: ${R.attach.map((x) => x.label).join("; ")}.` : "";
+  const warnData = R.data.length ? `\n\n✏️ Маягтад [ДУТУУ] үлдсэн: ${R.data.map((x) => x.label).join("; ")}.` : "";
+  await send(psid, `✅ Тендерийн материал бэлэн боллоо.\n\n• 01 — Шалгах жагсаалт (танд зориулсан, тендерт хавсаргахгүй)\n• 02 — Тендерийн материал: маягтууд, албан бичиг${base.meta.type === "services" ? ", ажлын аргачлал" : ", техникийн санал"} (Word — засаж болно)${r.files.some((f) => /\.xlsx$/.test(f.name)) ? "\n• 03 — Үнийн задаргаа (Excel, томьёотой)" : "\n• Үнийн задаргааны Excel — үнэ дутуу тул гаргаагүй"}${r.files.some((f) => /ТӨСӨЛ/.test(f.name)) ? "\n• 04 — Таны батлах баримтын ТӨСӨЛ" : ""}${warnFail}${warnAttach}${warnData}\n\n⚠️ Анхаарах:\n1. Бүх тоо, нэрийг шалгана уу. Тендер илгээх маягтаар мэдээллийн үнэнийг та хариуцна.\n2. Тендерийг tender.gov.mn-д та өөрөө тоон гарын үсгээр илгээнэ. Эцсийн хугацаа: ${dl || "ТББ-ийг харна уу"} — сүүлийн мөчид бүү үлдээгээрэй.\n3. Бид тендерт тэнцэх, ялахыг баталгаажуулахгүй.\n\nНүднүүдээ засаж, баримт нэмээд дахин гаргах бол холбоосоо нээнэ үү (1 удаа үнэгүй):\n${st.url || ""}`, [["Цэс", "FLOW_MENU"]]);
   await S.setState(psid, { ...st, s: "tnd_done", runs: (st.runs || 0) + 1, delivered: (st.delivered || 0) + 1, deliveredAt: Date.now() });
-  job.outcome = "delivered"; return job;
+  job.outcome = r.report.forced ? "delivered_forced" : "delivered"; return job;
 }
 
 module.exports = { normalizeStatus, runAnalyze, runCompose, nowMN, convText };

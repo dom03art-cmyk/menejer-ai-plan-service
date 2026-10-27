@@ -24,6 +24,12 @@ function respond(task, user) {
       brief: `«${tender.name}»\nЗахиалагч: ${tender.procuring_entity}\nТөсөвт өртөг: ${tender.budget}₮\nЭцсийн хугацаа: ${tender.deadline}` };
   }
   if (task === "A1X") return { items: [], tech_specs: [], requirements: [{ id: "R101", category: "other", text: "Урт ТББ-ийн 2-р хэсгийн нэмэлт шаардлага", ref: "ТТ 9", evidence: "—" }], forms: [], numeric_criteria: [], inconsistencies: [], contract: {} };
+  if (task === "A2S") return { file_slots: [
+      { key: "cert", label: "Улсын бүртгэлийн гэрчилгээ", help: "Гэрчилгээний 2 талын хуулбар", required: true, req_id: (tender.requirements[0] || {}).id, multi: false, checks: { expiry: false, company: true } },
+      { key: "fin", label: "Санхүүгийн тайлан", help: "ТББ-д заасан онуудын", required: true, multi: true, checks: { company: true } },
+      { key: "license", label: "Тусгай зөвшөөрөл", help: "Хүчинтэй хугацаатай", required: true, multi: false, checks: { expiry: true, company: true } }],
+    extra_fields: d.meta.type === "services" ? [{ key: "staff", label: "Ажилтнуудын жагсаалт", input: "textarea", required: true }] : [], brief_items: [tender.name, tender.procuring_entity], warning: "" };
+  if (task === "FILE") { const t = String(user.text || ""); return { matches: !/WRONG/.test(t), readable: !/BLUR/.test(t), doc_type: user.slot.label, company_name: /OTHERCO/.test(t) ? "Өөр компани ХХК" : d.customer.company.name, reg_no: "", valid_until: /EXPIRED/.test(t) ? "2025-01-01" : /SOON/.test(t) ? new Date(Date.now() + 70 * 864e5).toISOString().slice(0, 10) : "", years: [], values: {}, facts: ["Туршилтын баримт: " + user.name], problems: [] }; }
   if (task === "A2") return { known: ["Компанийн нэр: " + d.customer.company.name], questions: ["1. Гарын үсэг зурах хүний нэр, албан тушаал?", "2. 2024, 2025 оны борлуулалтын орлого?", "3. Санал болгох үнэ ба доод үнэ?"], docs: ["Улсын бүртгэлийн гэрчилгээ", "Санхүүгийн тайлан 2024, 2025"], critical: ["signatory", "metrics", "prices", "floor_price"], warning: "" };
   if (task === "GAP") return /доод үнэ|floor/i.test(String(user).split("\n").filter((l) => l.startsWith("Оролцогч:")).join("\n")) ? { missing: [], ready: true } : { missing: ["Доод үнэ (үнийн санал дуудах ажиллагаанд)"], ready: false };
   if (task === "B1") {

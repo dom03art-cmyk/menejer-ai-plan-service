@@ -13,6 +13,7 @@ function ask(task, docsText, user, maxTokens) {
 
 const analyzeTender = (docsText, lot) => ask("A1", docsText, P.A1(lot), 40000);
 const analyzeMore = (docsText, tender, part, parts) => ask("A1X", docsText, P.A1X(tender, part, parts), 24000);
+const slotPlan = (docsText, tender) => ask("A2S", docsText, P.A2S(tender), 8000);
 const questions = (docsText, tender, conv) => ask("A2", docsText, P.A2(tender, conv), 6000);
 async function gapCheck(critical, qs, conv) {
   if (MOCK()) return require("./test/mock").respond("GAP", conv);
@@ -22,4 +23,4 @@ async function gapCheck(critical, qs, conv) {
 const customerData = (docsText, base, conv, issues) => ask("B1", docsText, P.B1(base, conv, issues), 40000);
 const texts = (docsText, base, conv, issues) => ask("B2", docsText, P.B2(base, conv, issues), 40000);
 
-module.exports = { analyzeTender, analyzeMore, questions, gapCheck, customerData, texts };
+module.exports = { slotPlan, analyzeTender, analyzeMore, questions, gapCheck, customerData, texts };

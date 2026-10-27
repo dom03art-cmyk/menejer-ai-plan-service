@@ -31,9 +31,12 @@ function enqueue({ psid, kind, ...extra }) {
   if (!canRun(psid)) return { ok: false, error: "tender үйлчилгээ идэвхжээгүй (TENDER_ENABLED=1)" };
   if (activeByPsid.has(psid)) return { ok: true, job_id: activeByPsid.get(psid), status: "already_running" };
   const id = crypto.randomUUID(), job = { id, psid, kind, ...extra, status: "queued", createdAt: Date.now() };
-  jobs.set(id, job); activeByPsid.set(psid, id); queue.push(job); pump();
+  jobs.set(id, job); activeByPsid.set(psid, id); queue.push(job); saveActive(); pump();
   return { ok: true, job_id: id, status: "queued", position: queue.length };
 }
+
+// Идэвхтэй ажлын жагсаалтыг үргэлж хадгална — сервер гэнэт унтарсан ч асахдаа дахин эхлүүлнэ
+function saveActive() { const list = [...jobs.values()].filter((j) => j.status === "running" || j.status === "queued").map((j) => ({ psid: j.psid, kind: j.kind })); require("./store").setMisc("interrupted", list).catch(() => { }); }
 
 function pump() {
   while (running < MAX_PARALLEL && queue.length) {
@@ -43,7 +46,7 @@ function pump() {
       .catch(async (e) => { job.status = e.status === "blocked" ? "blocked" : "failed"; job.error = e.message; console.error(`[tender ${job.id}] АЛДАА`, e); await require("./flow").onFailed(job, e).catch(() => { }); })
       .finally(() => { const u = job.usage || {}; job.seconds = Math.round((Date.now() - t0) / 1000);
         console.log(`[tender ${job.id}] ${job.kind} ${job.status} ${job.outcome || ""} ${job.seconds}с | токен in ${u.input} out ${u.output} cache_w ${u.cache_write} cache_r ${u.cache_read} дуудлага ${u.calls}`);
-        running--; activeByPsid.delete(job.psid); job.finishedAt = Date.now(); pump(); });
+        running--; activeByPsid.delete(job.psid); job.finishedAt = Date.now(); saveActive(); pump(); });
   }
 }
 
@@ -65,7 +68,7 @@ let shuttingDown = false;
 process.on("SIGTERM", () => {
   if (shuttingDown) return; shuttingDown = true;
   const cut = [...jobs.values()].filter((j) => j.status === "running" || j.status === "queued").map((j) => ({ psid: j.psid, kind: j.kind }));
-  if (cut.length) { console.warn(`[tender] сервер унтарч байна — ${cut.length} ажил тасарлаа`); require("./store").setMisc("interrupted", cut).catch(() => { }); }
+  if (cut.length) console.warn(`[tender] сервер унтарч байна — ${cut.length} ажил тасарлаа (асахдаа сэргээнэ)`);
 });
 setTimeout(async () => {
   try {

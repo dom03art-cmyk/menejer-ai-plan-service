@@ -16,6 +16,7 @@ async function toPaid(psid, lot) {
   await S.addFile(psid, { name: "TBB.pdf", mime: "application/pdf", buf: Buffer.from("ТББ текст (mock)"), phase: "tbb" });
   await F.onUploaded(psid);
   await say(psid, lot ? { text: lot } : { payload: "TND_ONELOT" });
+  await say(psid, { payload: "TND_AGREE" });
   await say(psid, { attachments: [{ type: "image", payload: { url: "https://example.invalid/receipt.jpg" } }] });
   await F.adminAction(`PAYOK|TND|${psid}`);
   await idle();
@@ -25,30 +26,23 @@ async function toPaid(psid, lot) {
   console.log("1) Үйлчилгээ (харуул хамгаалалт, үнийн санал дуудах) — бүтэн урсгал");
   process.env.TENDER_MOCK_CASE = "security"; MOCK.reset();
   let p = "U1"; await toPaid(p);
-  ok((await S.getState(p)).s === "tnd_interview", "шинжилгээний дараа асуулт асуух төлөвт");
-  ok(msgs(p).some((m) => /Материал бэлтгэхэд дараах мэдээлэл/.test(m.text || "")), "асуулт илгээгдсэн");
-  ok((await say(p, { text: "Захирал Б.Бат. 2024: 85 сая, 2025: 90 сая" })) === "ext", "хариулт хүлээж авав");
-  await say(p, { payload: "TND_READY" });
-  ok(msgs(p).some((m) => /хэрэгтэй хэвээр/.test(m.text || "")), "дутуу (доод үнэ) нэг удаа асуув");
-  await say(p, { text: "Доод үнэ 70 сая" }); await say(p, { payload: "TND_READY" }); await idle();
+  ok((await S.getState(p)).s === "tnd_slots", "шинжилгээний дараа нүднүүд бөглөх төлөвт");
+  ok((await say(p, { text: "сайн уу" })) === "ext" && msgs(p).slice(-1)[0].text.includes("/u/tnd/"), "чатаар бичихэд хуудасны холбоос дахин илгээв");
+  await F.startCompose(p, {}); await idle();
   const st1 = await S.getState(p);
   ok(st1.s === "tnd_done" && st1.delivered === 1, "материал хүргэгдэв");
   const files1 = msgs(p).filter((m) => m.file).map((m) => m.file);
-  ok(files1.includes("01-shalgakh-jagsaalt.docx") && files1.includes("02-tenderiin-material.docx") && files1.includes("03-unii-zadargaa.xlsx"), `файлууд: ${files1.join(", ")}`);
-  ok(msgs(p).some((m) => /💰 Санал болгох үнэ/.test(m.text || "") && /↘️/.test(m.text || "") && /⏰/.test(m.text || "")), "чатад үнэ, доод үнэ, хугацаа үлдсэн");
+  ok(files1.includes("01-shalgakh-jagsaalt.docx") && files1.includes("02-tenderiin-material.docx"), `файлууд: ${files1.join(", ")}`);
+  ok(msgs(p).some((m) => /⏰/.test(m.text || "")), "чатад хугацаа үлдсэн");
   ok(!msgs(p).some((m) => /захиалагч(ийн)? өгсөн|Claude|JSON/.test(m.text || "")), "дотоод үг алга");
-  await say(p, { payload: "TND_RERUN" }); await say(p, { text: "Ажилтан нэмэгдсэн" }); await say(p, { payload: "TND_READY" }); await idle();
-  ok((await S.getState(p)).delivered === 2, "1 удаа үнэгүй дахин гаргав");
-  await say(p, { payload: "TND_RERUN" });
-  ok((await S.getState(p)).s === "tnd_left", "2 дахь дахин гаргалтаас татгалзав");
 
   console.log("2) Бараа, олон багц — багц сонгуулах");
   process.env.TENDER_MOCK_CASE = "office"; MOCK.reset();
   p = "U2"; await toPaid(p);
   ok((await S.getState(p)).s === "tnd_lot", "багц сонгуулах төлөвт");
   await say(p, { payload: "TND_LOT_2" }); await idle();
-  ok((await S.getState(p)).s === "tnd_interview", "Багц 3 сонгоод асуулт ирэв");
-  await say(p, { text: "мэдээлэл" }); await say(p, { payload: "TND_GO" }); await idle();
+  ok((await S.getState(p)).s === "tnd_slots", "Багц 3 сонгоод нүднүүд гарав");
+  await F.startCompose(p, {}); await idle();
   const files2 = msgs(p).filter((m) => m.file).map((m) => m.file);
   ok(files2.length === 4 && files2.some((f) => /^04-/.test(f)), `бараа + бодлогын төсөл: ${files2.join(", ")}`);
 
@@ -70,9 +64,9 @@ async function toPaid(psid, lot) {
   process.env.TENDER_MOCK_CASE = "security";
   await S.addFile(p, { name: "TBB2.pdf", mime: "application/pdf", buf: Buffer.from("ТББ 2"), phase: "tbb" });
   await F.onUploaded(p); await say(p, { payload: "TND_ONELOT" }); await idle();
-  ok((await S.getState(p)).s === "tnd_interview" && !msgs(p).slice(-6).some((m) => /💳 Төлбөр/.test(m.text || "")), "дахин төлбөргүйгээр шинжилж асуулт ирэв");
+  ok((await S.getState(p)).s === "tnd_slots" && !msgs(p).slice(-6).some((m) => /💳 Төлбөр|нөхцөл/.test(m.text || "")), "дахин төлбөр, нөхцөлгүйгээр шинжилж нүднүүд гарав");
   await say(p, { payload: "TND_NEWTENDER" });
-  ok((await S.getState(p)).s === "tnd_interview", "ярилцлагын үед «өөр тендер» товч ажиллахгүй");
+  ok((await S.getState(p)).s === "tnd_slots", "бөглөж байх үед «өөр тендер» товч ажиллахгүй");
 
   console.log("4в) Олон багцтай, хугацаа дууссан → багц асуухгүй шууд мэдэгдэнэ");
   process.env.TENDER_MOCK_CASE = "office"; process.env.TENDER_MOCK_LOTEXPIRED = "1"; MOCK.reset();
@@ -82,16 +76,14 @@ async function toPaid(psid, lot) {
 
   console.log("5) Claude аргачлал орхисон → автоматаар засав");
   process.env.TENDER_MOCK_CASE = "security"; process.env.TENDER_MOCK_BREAK = "1"; MOCK.reset();
-  p = "U5"; await toPaid(p); await say(p, { text: "доод үнэ 70 сая" }); await say(p, { payload: "TND_GO" }); await idle();
+  p = "U5"; await toPaid(p); await F.startCompose(p, {}); await idle();
   ok((await S.getState(p)).delivered === 1 && MOCK.calls.filter((x) => x === "B2").length === 2, "B2 дахин дуудагдаж материал гарав");
   delete process.env.TENDER_MOCK_BREAK;
 
-  console.log("6) Оролцогчийн мэдээлэл дутуу (доод үнэ) → асуугаад дахин");
+  console.log("6) Доод үнэ дутуу ч оролцогчийн сонголтоор материал гарна");
   process.env.TENDER_MOCK_GAP = "1"; MOCK.reset();
-  p = "U6"; await toPaid(p); await say(p, { text: "мэдээлэл" }); await say(p, { payload: "TND_GO" }); await idle();
-  ok((await S.getState(p)).s === "tnd_interview" && msgs(p).some((m) => /дутуу байна:/.test(m.text || "") && /доод үнэ/i.test(m.text || "")), "дутууг жагсааж асуув");
-  await say(p, { text: "Доод үнэ 72 сая" }); await say(p, { payload: "TND_READY" }); await idle();
-  ok((await S.getState(p)).delivered === 1, "нөхсөний дараа хүргэгдэв");
+  p = "U6"; await toPaid(p); await F.startCompose(p, { reds: { attach: [], data: [{ label: "Доод үнэ" }], fail: [] } }); await idle();
+  ok((await S.getState(p)).delivered === 1 && msgs(p).some((m) => m.file === "02-tenderiin-material.docx"), "дутуу байсан ч материал хүргэгдэв");
   delete process.env.TENDER_MOCK_GAP;
 
   console.log("7) Үндсэн цэс рүү гарах, унтраалга");
