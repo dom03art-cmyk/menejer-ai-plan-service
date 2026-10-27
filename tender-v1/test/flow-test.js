@@ -97,6 +97,19 @@ async function toPaid(psid, lot) {
   ok((await say("U9", { payload: "TENDER" })) === "NOT_CLAIMED", "бусдад хаалттай");
   ok(I.enqueue({ psid: "U9", kind: "analyze" }).ok === false, "бусдад ажил үүсгэхгүй");
 
+  console.log("8) Туршилтын товчлол «тендер-хуудас» — ТББ уншилт, төлбөргүй");
+  process.env.TENDER_ENABLED = "0"; process.env.TENDER_MOCK_CASE = "security"; MOCK.reset();
+  ok((await say("U10", { text: "тендер-хуудас" })) === "NOT_CLAIMED", "туршигч биш бол ажиллахгүй");
+  ok((await say("ADMIN", { text: "тендер-хуудас" })) === "ext" && (await S.getState("ADMIN")).s === "tnd_slots", "туршигчид хуудас шууд нээгдэв");
+  const kd = await S.getCase("ADMIN");
+  ok(kd.slots.filter((x) => x.kind === "file").length === 7 && new Date(kd.base.tender.deadline) > new Date() && !MOCK.calls.includes("A1"), "7 баримтын нүд, хугацаа ирээдүйд, A1 дуудаагүй");
+  ok(msgs("ADMIN").slice(-1)[0].text.includes("/u/tnd/"), "холбоос илгээв");
+  await say("ADMIN", { text: "Тендер-хуудас бараа" });
+  const kg = await S.getCase("ADMIN");
+  ok(kg.demo === "goods" && kg.slots.some((x) => x.key === "prices"), "бараа: үнийн хүснэгттэй");
+  await F.startCompose("ADMIN", {}); await idle();
+  ok((await S.getState("ADMIN")).delivered === 1, "туршилтын хуудаснаас материал гарав");
+
   console.log(fails ? `\nАЛДАА: ${fails}` : "\nБүх шалгалт амжилттай");
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });

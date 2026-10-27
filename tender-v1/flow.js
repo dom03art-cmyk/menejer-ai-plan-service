@@ -47,6 +47,8 @@ async function claims(psid, payload, text) {
     const st0 = await S.getState(psid).catch((e) => ({ err: e.message }));
     console.log(`[tender] claims psid=${psid} payload=${JSON.stringify(payload)} text=${JSON.stringify(String(text || "").slice(0, 40))} enabled=${enabled()} state=${st0 && (st0.s || st0.err) || "-"}`);
   }
+  // Туршилт: «тендер-хуудас» — ТББ уншилт, төлбөргүйгээр жишээ тендерийн хуудсыг шууд нээнэ
+  if (!payload && isTester(psid) && require("./demo").KEYWORD.test(String(text || ""))) return true;
   // Туршилт: зөвшөөрөгдсөн psid «тендер» гэж бичвэл эхэлнэ (Make-д товч нэмэхээс өмнө)
   if (!payload && /^\s*тендер\s*$/i.test(String(text || "")) && isTester(psid)) {
     const cur = await S.getState(psid).catch(() => null);
@@ -189,6 +191,10 @@ async function handle({ psid, text, payload, attachments }) {
   const tcode = String(process.env.TENDER_TEST_CODE || "").trim().toLowerCase();
   if (!payload && tcode && text.toLowerCase() === tcode && !BUSY.has(st.s)) payload = "TENDER";
   if (!payload && /^\s*тендер\s*$/i.test(text) && (!st.s || st.s === "new" || st.s === "tnd_left" || st.s === "tnd_done")) payload = "TENDER";
+  if (!payload && isTester(psid) && require("./demo").KEYWORD.test(text)) {
+    if (BUSY.has(st.s)) { await send(psid, "Өмнөх ажил дуусахыг хүлээнэ үү ⏳"); return "ext"; }
+    await send(psid, await require("./demo").openDemo(psid, text, uploadUrl(psid)), [CANCEL_BTN]); return "ext";
+  }
   if (payload === "TENDER") { if (BUSY.has(st.s)) { await send(psid, "Таны тендерийн захиалгыг боловсруулж байна ⏳ Бэлэн болмогц мэдэгдэнэ."); return "ext"; } return start(psid); }
   if (payload === "TND_CANCEL" || (CANCEL.test(text) && !BUSY.has(st.s) && !["tnd_interview", "tnd_done"].includes(st.s))) {
     if (st.qpay && st.qpay.no && st.s === "tnd_pay") await require("../org-v1/qpay").cancelInvoice(st.qpay.no).catch(() => { });
