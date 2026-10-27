@@ -113,10 +113,37 @@ async function fileContent(f, buf) {
   return [{ type: "text", text: buf.toString("utf8").slice(0, 60000) }];
 }
 
+// Том файл (зураг, каталог, олон хуудастай PDF): эхний CHECK_PAGES хуудсыг л шалгана. Чадахгүй бол шалгалтгүйгээр (шар) хүлээж авна.
+const CHECK_PAGES = () => Number(process.env.TENDER_CHECK_PAGES || 5);
+const CHECK_MAX_BYTES = () => Number(process.env.TENDER_CHECK_MAX_MB || 8) * 1048576;
+const IMG_MAX = 3.7 * 1048576; // Claude зураг ≤5MB (base64)
+const UNCHECKED = (why) => ({ readable: true, matches: true, unchecked: true, problems: [`${why} — автоматаар шалгаагүй, агуулгыг өөрөө нягтална уу`] });
+async function trimForCheck(f, buf) {
+  const n = String(f.name || "").toLowerCase(), isPdf = /\.pdf$/.test(n) || /pdf/.test(f.mime || "");
+  if (isPdf) {
+    let part = buf, note = "";
+    try {
+      const { PDFDocument } = require("pdf-lib");
+      const doc = await PDFDocument.load(buf, { ignoreEncryption: true }), total = doc.getPageCount();
+      if (total > CHECK_PAGES() || buf.length > CHECK_MAX_BYTES()) {
+        const out = await PDFDocument.create(), idx = Array.from({ length: Math.min(CHECK_PAGES(), total) }, (_, i) => i);
+        (await out.copyPages(doc, idx)).forEach((p) => out.addPage(p));
+        part = Buffer.from(await out.save()); note = `эхний ${idx.length}/${total} хуудсыг шалгав`;
+      }
+    } catch (_) { if (buf.length > CHECK_MAX_BYTES()) return { skip: "Том PDF файл" }; }
+    if (part.length > CHECK_MAX_BYTES()) return { skip: "Хуудас нь хэт том зурагтай PDF" };
+    return { buf: part, note };
+  }
+  if (sniffImg(buf) && buf.length > IMG_MAX) return { skip: "Том хэмжээтэй зураг" };
+  return { buf, note: "" };
+}
+
 async function readFileForSlot(slot, f, buf) {
-  if (MOCK()) return require("./test/mock").respond("FILE", { slot, name: f.name, text: buf.toString("utf8") });
+  if (MOCK()) { if (/BIGFILE/.test(f.name || "")) return UNCHECKED("Том файл"); return require("./test/mock").respond("FILE", { slot, name: f.name, text: buf.toString("utf8") }); }
+  const tr = await trimForCheck(f, buf);
+  if (tr.skip) return UNCHECKED(tr.skip);
   const { callJSON, FAST } = require("../plan-v2/claude");
-  const content = [...(await fileContent(f, buf)), { type: "text", text: `Нүд: «${slot.label}»${slot.help ? ` (${slot.help})` : ""}. Файлын нэр: ${f.name}. Шалгаад JSON бич.` }];
+  const content = [...(await fileContent(f, tr.buf)), { type: "text", text: `Нүд: «${slot.label}»${slot.help ? ` (${slot.help})` : ""}. Файлын нэр: ${f.name}.${tr.note ? ` Анхаар: том файл тул ${tr.note} — үлдсэн хуудсыг харахгүй, үүнээс болж «дутуу» гэж бүү дүгнэ.` : ""} Шалгаад JSON бич.` }];
   return callJSON({ system: FILE_SYS, user: content, model: process.env.TENDER_CHECK_MODEL || FAST, maxTokens: 2500 });
 }
 
@@ -147,7 +174,7 @@ function evaluate(slots, values, ctx) {
     else if (s.kind === "table") out[s.key] = checkTable(s, v.value, c);
     else {
       const files = v.files || [];
-      if (!files.length) out[s.key] = s.required ? { status: "red", kind: "attach", msg: "Файл оруулаагүй" } : { status: "empty", msg: "" };
+      if (!files.length) out[s.key] = v.self ? { status: "yellow", kind: "self", msg: "📎 Та tender.gov.mn-д өөрөө хавсаргана" } : s.required ? { status: "red", kind: "attach", msg: "Файл оруулаагүй" } : { status: "empty", msg: "" };
       else { const ord = { red: 3, yellow: 2, green: 1 }; const worst = files.map((f) => judgeFile(s, f.read || {}, c)).sort((a, b) => ord[b.status] - ord[a.status])[0]; out[s.key] = worst; }
     }
   }
@@ -162,7 +189,7 @@ function formText(slots, values, status) {
     const mark = { green: "✔", yellow: "⚠", red: "✘", empty: "—" }[st.status] || "—";
     if (s.kind === "field") L.push(`${mark} ${s.label}: ${v.value ?? "(бөглөөгүй)"}${st.msg ? ` [${st.msg}]` : ""}`);
     else if (s.kind === "table") { L.push(`${mark} ${s.label}:`); for (const r of v.value || []) L.push("   " + JSON.stringify(r)); if (!(v.value || []).length) L.push("   (бөглөөгүй)"); }
-    else { L.push(`${mark} ${s.label}${s.req_id ? ` (шаардлага ${s.req_id})` : ""}: ${(v.files || []).length ? "" : "ФАЙЛ АЛГА — оролцогч өөрөө хавсаргана"}${st.msg ? ` [${st.msg}]` : ""}`);
+    else { L.push(`${mark} ${s.label}${s.req_id ? ` (шаардлага ${s.req_id})` : ""}: ${(v.files || []).length ? "" : v.self ? "оролцогч tender.gov.mn-д өөрөө хавсаргана гэж баталсан (баримт бий)" : "ФАЙЛ АЛГА — оролцогч өөрөө хавсаргана"}${st.msg ? ` [${st.msg}]` : ""}`);
       for (const f of v.files || []) { const r = f.read || {}; L.push(`   • ${f.name}${r.valid_until ? `, хүчинтэй ${r.valid_until}` : ""}${r.company_name ? `, ${r.company_name}` : ""}`); for (const x of r.facts || []) L.push(`     - ${x}`); if (r.values && Object.keys(r.values).length) L.push(`     - тоо: ${JSON.stringify(r.values)}`); } }
   }
   return L.join("\n");
@@ -175,4 +202,7 @@ function reds(slots, status) {
   return R;
 }
 
-module.exports = { buildSlots, checkField, checkTable, offerTotal, readFileForSlot, judgeFile, evaluate, formText, reds, num };
+// «Өөрөө хавсаргана» гэж тэмдэглэсэн нүднүүд
+function selfs(slots, values) { return slots.filter((s) => s.kind === "file" && !((values[s.key] || {}).files || []).length && (values[s.key] || {}).self).map((s) => ({ key: s.key, label: s.label })); }
+
+module.exports = { trimForCheck, selfs, buildSlots, checkField, checkTable, offerTotal, readFileForSlot, judgeFile, evaluate, formText, reds, num };

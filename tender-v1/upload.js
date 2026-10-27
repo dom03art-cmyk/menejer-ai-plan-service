@@ -46,7 +46,7 @@ async function stateJSON(psid) {
     const SL = require("./slots"), T = (kase.base || {}).tender || {};
     const ev = SL.evaluate(kase.slots, kase.values || {}, { tender: T, deadline: T.deadline });
     const vals = {};
-    for (const s of kase.slots) { const v = (kase.values || {})[s.key] || {}; vals[s.key] = s.kind === "file" ? { files: (v.files || []).map((f) => ({ id: f.id, name: f.name, ...SL.judgeFile(s, f.read || {}, { deadline: T.deadline }) })) } : { value: v.value ?? null }; }
+    for (const s of kase.slots) { const v = (kase.values || {})[s.key] || {}; vals[s.key] = s.kind === "file" ? { self: !!v.self, files: (v.files || []).map((f) => ({ id: f.id, name: f.name, ...SL.judgeFile(s, f.read || {}, { deadline: T.deadline }) })) } : { value: v.value ?? null }; }
     const free = (st.delivered || 0) === 0 || ((st.delivered || 0) <= 1 && Date.now() - (st.deliveredAt || 0) < 14 * 864e5);
     Object.assign(out, { tender: { name: T.name, entity: T.procuring_entity, budget: T.budget, deadline: T.deadline, type: (kase.base.meta || {}).type, auction: !!T.auction }, slots: kase.slots, values: vals, status: ev.status, offerTotal: ev.offerTotal, reds: SL.reds(kase.slots, ev.status), delivered: st.delivered || 0, canGenerate: out.s === "tnd_slots" || (out.s === "tnd_done" && free && !st.final) });
   }
@@ -95,14 +95,15 @@ router.post("/u/tnd/:token/slot/:key/file", rawBody, async (req, res) => {
   const kase = await S.getCase(t.psid), slot = kase && (kase.slots || []).find((s) => s.key === key && s.kind === "file");
   if (!slot) return res.status(404).json({ ok: false, error: "Нүд олдсонгүй" });
   try {
-    const PR = require("./pricing"), pc = await PR.pagesOf({ buf, name, mime }); if (pc.error) return res.json({ ok: false, error: pc.error });
-    if (PR.sumPages(await S.listFiles(t.psid), "bidder") + pc.pages > PR.bidderMax()) return res.json({ ok: false, error: `Баримтын нийт хэмжээ ${PR.bidderMax()} хуудаснаас хэтэрлээ. Шаардлагатай хуудсуудаа л оруулна уу.` });
-    const r = await S.addFile(t.psid, { name, mime, buf, phase: "bidder", pages: pc.pages });
+    // Хуудасны тоо зардалд нөлөөлөхгүй (эхний хэдэн хуудсыг л шалгана) тул нүдний файлд хуудасны хязгаар тавихгүй — зөвхөн 25MB/файл
+    const PR = require("./pricing"), pc = await PR.pagesOf({ buf, name, mime }).catch(() => ({ pages: null }));
+    const r = await S.addFile(t.psid, { name, mime, buf, phase: "bidder", pages: pc.error ? null : pc.pages });
     if (!r.ok) return res.json({ ok: false, error: r.error });
     const SL = require("./slots");
     let read; try { read = await SL.readFileForSlot(slot, r.file, buf); } catch (e) { if (/credit balance/i.test(e.message || "")) require("./msg").admin("⚠️ Anthropic API кредит дууссан! (тендерийн файл шалгалт)"); read = { readable: true, matches: true, problems: ["Автомат шалгалт түр ажилласангүй — дараа нь гараар шалгагдана"] }; }
     await withLock(t.psid, async () => {
       const k = await S.getCase(t.psid), values = k.values || {}, v = values[key] || { files: [] };
+      delete v.self;
       v.files = slot.multi ? [...(v.files || []).filter((f) => f.id !== r.file.id), { id: r.file.id, name, read }] : [{ id: r.file.id, name, read }];
       values[key] = v; await S.patchCase(t.psid, { values });
     });
@@ -113,6 +114,15 @@ router.post("/u/tnd/:token/slot/:key/remove", express.json(), async (req, res) =
   const t = tok(req, res); if (!t) return; if (!(await editable(t.psid))) return res.json({ ok: false });
   const key = String(req.params.key), id = String((req.body || {}).id || "");
   await withLock(t.psid, async () => { const k = await S.getCase(t.psid), values = k.values || {}; if (values[key]) values[key].files = (values[key].files || []).filter((f) => f.id !== id); await S.patchCase(t.psid, { values }); });
+  res.json(await stateJSON(t.psid));
+});
+// «Өөрөө хавсаргана» (файл оруулахгүй, tender.gov.mn-д оролцогч өөрөө хавсаргана)
+router.post("/u/tnd/:token/slot/:key/self", express.json(), async (req, res) => {
+  const t = tok(req, res); if (!t) return; if (!(await editable(t.psid))) return res.json({ ok: false, error: "Одоо засах боломжгүй" });
+  const key = String(req.params.key), on = !!(req.body || {}).on;
+  const kase = await S.getCase(t.psid), slot = kase && (kase.slots || []).find((s) => s.key === key && s.kind === "file");
+  if (!slot) return res.status(404).json({ ok: false });
+  await withLock(t.psid, async () => { const k = await S.getCase(t.psid), values = k.values || {}, v = values[key] || { files: [] }; if (on) v.self = true; else delete v.self; values[key] = v; await S.patchCase(t.psid, { values }); });
   res.json(await stateJSON(t.psid));
 });
 router.post("/u/tnd/:token/value", express.json({ limit: "200kb" }), async (req, res) => {
@@ -212,7 +222,9 @@ function client() {
     } else {
       h += '<ul class="list">' + (v.files || []).map(function (f) { return '<li class="' + f.status + '"><span class="nm">' + dot(f.status) + e(f.name) + "</span>" + (locked ? "" : '<a href="#" class="x" data-frm="' + e(s.key) + "|" + f.id + '">×</a>') + "</li>"; }).join("") + "</ul>";
       if (busyKeys[s.key]) h += '<div class="wait">⏳ шалгаж байна… (10–40 сек)</div>';
-      else if (!locked && (s.multi || !(v.files || []).length)) h += '<label class="pick small" for="u_' + e(s.key) + '">' + ((v.files || []).length ? "+ файл нэмэх" : "Файл оруулах") + '</label><input id="u_' + e(s.key) + '" data-u="' + e(s.key) + '" type="file" accept=".pdf,.docx,.xls,.xlsx,image/*"' + (s.multi ? " multiple" : "") + ">";
+      else if (!locked && v.self && !(v.files || []).length) h += '<button class="mini" data-self="' + e(s.key) + '" data-on="0">↩︎ Буцаах — файл оруулна</button>';
+      else if (!locked && (s.multi || !(v.files || []).length)) { h += '<label class="pick small" for="u_' + e(s.key) + '">' + ((v.files || []).length ? "+ файл нэмэх" : "Файл оруулах") + '</label><input id="u_' + e(s.key) + '" data-u="' + e(s.key) + '" type="file" accept=".pdf,.docx,.xls,.xlsx,image/*"' + (s.multi ? " multiple" : "") + ">";
+        if (!(v.files || []).length) h += '<button class="mini" data-self="' + e(s.key) + '" data-on="1">📎 Өөрөө хавсаргана (том файл, эсвэл дараа бүрдүүлнэ)</button>'; }
       else if (!locked) h += '<label class="pick small alt" for="u_' + e(s.key) + '">Солих</label><input id="u_' + e(s.key) + '" data-u="' + e(s.key) + '" data-replace="1" type="file" accept=".pdf,.docx,.xls,.xlsx,image/*">';
     }
     if (st.msg) h += '<div class="msg">' + e(st.msg) + "</div>";
@@ -226,6 +238,7 @@ function client() {
     [].forEach.call(document.querySelectorAll("[data-add]"), function (b) { b.onclick = function () { var k = b.getAttribute("data-add"), t = document.querySelector('[data-t="' + k + '"]'), rows = tableVal(t); rows.push({ name: " " }); saveVal(k, rows); }; });
     [].forEach.call(document.querySelectorAll("[data-u]"), function (inp) { inp.onchange = function () { var k = inp.getAttribute("data-u"), fl = [].slice.call(inp.files); upSlot(k, fl); }; });
     [].forEach.call(document.querySelectorAll("[data-frm]"), function (a) { a.onclick = function (ev) { ev.preventDefault(); var p = a.getAttribute("data-frm").split("|"); post("/slot/" + encodeURIComponent(p[0]) + "/remove", { id: p[1] }).then(function (j) { if (j.ok) { S = j; render(); } }); }; });
+    [].forEach.call(document.querySelectorAll("[data-self]"), function (b) { b.onclick = function () { post("/slot/" + encodeURIComponent(b.getAttribute("data-self")) + "/self", { on: b.getAttribute("data-on") === "1" }).then(function (j) { if (j.ok !== false && j.slots) { S = j; render(); } }); }; });
     if ($("gen")) $("gen").onclick = function () { gen(false); };
   }
   function upSlot(k, fl) {

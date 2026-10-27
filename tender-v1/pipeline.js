@@ -178,7 +178,8 @@ async function runCompose(job, log = console.log) {
   }
   const R = SL.reds(kase.slots, ev.status);
   const warnFail = r.qc.decision === "nogo" || R.fail.length ? `\n\n❗ Танай байгууллага зарим шаардлагыг хангахгүй байна (шалгах жагсаалтыг үзнэ үү). Ийм тохиолдолд тендерээс хасагдах эрсдэл өндөр.` : "";
-  const warnAttach = R.attach.length ? `\n\n📎 Та өөрөө хавсаргах: ${R.attach.map((x) => x.label).join("; ")}.` : "";
+  const selfL = SL.selfs(kase.slots, kase.values || {});
+  const warnAttach = R.attach.length || selfL.length ? `\n\n📎 Та өөрөө хавсаргах: ${[...R.attach, ...selfL].map((x) => x.label).join("; ")}.` : "";
   const warnData = R.data.length ? `\n\n✏️ Маягтад [ДУТУУ] үлдсэн: ${R.data.map((x) => x.label).join("; ")}.` : "";
   await send(psid, `✅ Тендерийн материал бэлэн боллоо.\n\n• 01 — Шалгах жагсаалт (танд зориулсан, тендерт хавсаргахгүй)\n• 02 — Тендерийн материал: маягтууд, албан бичиг${base.meta.type === "services" ? ", ажлын аргачлал" : ", техникийн санал"} (Word — засаж болно)${r.files.some((f) => /\.xlsx$/.test(f.name)) ? "\n• 03 — Үнийн задаргаа (Excel, томьёотой)" : "\n• Үнийн задаргааны Excel — үнэ дутуу тул гаргаагүй"}${r.files.some((f) => /ТӨСӨЛ/.test(f.name)) ? "\n• 04 — Таны батлах баримтын ТӨСӨЛ" : ""}${warnFail}${warnAttach}${warnData}\n\n⚠️ Анхаарах:\n1. Бүх тоо, нэрийг шалгана уу. Тендер илгээх маягтаар мэдээллийн үнэнийг та хариуцна.\n2. Тендерийг tender.gov.mn-д та өөрөө тоон гарын үсгээр илгээнэ. Эцсийн хугацаа: ${dl || "ТББ-ийг харна уу"} — сүүлийн мөчид бүү үлдээгээрэй.\n3. Бид тендерт тэнцэх, ялахыг баталгаажуулахгүй.\n\nНүднүүдээ засаж, баримт нэмээд дахин гаргах бол холбоосоо нээнэ үү (1 удаа үнэгүй):\n${st.url || ""}`, [["Цэс", "FLOW_MENU"]]);
   await S.setState(psid, { ...st, s: "tnd_done", runs: (st.runs || 0) + 1, delivered: (st.delivered || 0) + 1, deliveredAt: Date.now() });
