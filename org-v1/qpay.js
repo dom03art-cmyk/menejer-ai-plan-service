@@ -136,7 +136,11 @@ async function settle(no, via = "callback") {
   if (!(await lock(`qplock:${no}`))) return "busy";
   try {
     const { paid, payment_id } = await paidAmount(rec);
-    if (paid + 0.5 < rec.amount) { console.log(`[qpay] ${no} төлөгдөөгүй (${paid}/${rec.amount}, ${via})`); return "unpaid"; }
+    if (paid + 0.5 < rec.amount) {
+      console.log(`[qpay] ${no} төлөгдөөгүй (${paid}/${rec.amount}, ${via})`);
+      if (paid > 0 && rec.partial !== paid) { rec.partial = paid; await saveInv(rec); await partialNotice(rec, paid).catch((e) => console.warn("[qpay] дутуу мэдэгдэл:", e.message)); }
+      return "unpaid";
+    }
     rec.status = "paid"; rec.paidAt = Date.now(); rec.payment_id = payment_id; rec.paid = paid; await saveInv(rec);
     console.log(`[qpay] ${no} төлөгдлөө ${paid}₮ (${rec.kind}, ${via})`);
     const h = handlers[rec.kind];
@@ -145,6 +149,14 @@ async function settle(no, via = "callback") {
   } finally { await unlock(`qplock:${no}`); }
 }
 
+// Дутуу төлбөр: захиалагч ба админд нэг удаа мэдэгдэнэ (ажил эхлэхгүй)
+const money = (n) => `${Math.round(n).toLocaleString("en-US").replace(/,/g, " ")}₮`;
+async function partialNotice(rec, paid) {
+  const { fbText } = require("../plan-v2/util");
+  const rest = rec.amount - paid;
+  await fbText(rec.psid, `⚠️ Таны төлбөрөөс ${money(paid)} орж ирлээ. Нэхэмжлэхийн дүн ${money(rec.amount)} тул ${money(rest)} дутуу байна. Бүтэн дүн орсны дараа л боловсруулалт эхэлнэ.\n\nМенежер тань шалгаад удахгүй холбогдоно. Төлөхдөө банкны апп дүнг автоматаар бөглөөгүй бол дүнг яг нэхэмжлэхийн дагуу оруулна уу.`);
+  if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `⚠️ Дутуу төлбөр\nЗахиалагч: ${rec.psid}\nТөрөл: ${rec.kind}\nНэхэмжлэх: ${rec.no}\nДүн: ${money(rec.amount)}, орсон: ${money(paid)}, дутуу: ${money(rest)}\n\nbusiness.qpay.mn-ээс шалгаад захиалагчтай холбогдоно уу (үлдэгдлийг авах эсвэл буцаах).`);
+}
 // QPay callback (GET эсвэл POST). Хурдан 200 буцааж, шалгалтыг араас хийнэ. Хуурамч дуудлага ирсэн ч payment/check-ээр шалгадаг тул аюулгүй.
 async function callback(req, res) {
   const no = String(req.query.no || "").slice(0, 60);

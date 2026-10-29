@@ -271,7 +271,7 @@ async function offerQpay(psid, f, desc, head) {
     const inv = await QP.createInvoice({ psid, amount: f.price, description: `Менежер AI: ${desc}`, kind: "flow" });
     f.qpay = { no: inv.no, amount: inv.amount, short: inv.short || null }; await setF(psid, f);
     if (inv.qrUrl) await sendImage(psid, inv.qrUrl);
-    await send(psid, `${head ? head + "\n\n" : ""}💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, боловсруулалт эхэлнэ.`,
+    await send(psid, `${head ? head + "\n\n" : ""}💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, боловсруулалт эхэлнэ.\n\n⚠️ Банкны апп дүнг автоматаар бөглөөгүй бол яг ${fmtMoney(inv.amount)} гэж оруулна уу. Дутуу төлбөрөөр боловсруулалт эхлэхгүй.`,
       [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]);
     return true;
   } catch (e) {
@@ -497,7 +497,7 @@ router.post("/qpay/invoice", express.json(), auth, async (req, res) => {
     setTimeout(async () => {
       try {
         if (inv.qrUrl) await sendImage(String(psid), inv.qrUrl);
-        await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, энд мэдэгдэнэ.`,
+        await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, энд мэдэгдэнэ.\n\n⚠️ Банкны апп дүнг автоматаар бөглөөгүй бол яг ${fmtMoney(inv.amount)} гэж оруулна уу. Дутуу төлбөрөөр боловсруулалт эхлэхгүй.`,
           kind === "bizrev" ? [["Цуцлах", "BIZ_CANCEL"]] : [["Цуцлах", "BIZ_CANCEL"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]]);
       } catch (e) { console.warn("[qpay] biz QR илгээх:", e.message); }
     }, Number(process.env.QPAY_BIZ_DELAY_MS || 4000));
