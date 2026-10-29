@@ -268,10 +268,10 @@ async function offerQpay(psid, f, desc, head) {
   if (!QP.allowedFor(psid) || !(f.price > 0)) return false;
   try {
     if (f.qpay && f.qpay.no) await QP.cancelInvoice(f.qpay.no).catch(() => { });
-    const inv = await QP.createInvoice({ psid, amount: f.price, description: `Менежер AI: ${desc}`, kind: "flow" });
+    const inv = await QP.createInvoice({ psid, amount: f.price, description: `Менежер AI: ${desc}`, kind: "flow", meta: { product: f.product } });
     f.qpay = { no: inv.no, amount: inv.amount, short: inv.short || null }; await setF(psid, f);
     if (inv.qrUrl) await sendImage(psid, inv.qrUrl);
-    await send(psid, `${head ? head + "\n\n" : ""}💳 Төлбөр: ${fmtMoney(inv.amount)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, боловсруулалт эхэлнэ.\n\n⚠️ Банкны апп дүнг автоматаар бөглөөгүй бол яг ${fmtMoney(inv.amount)} гэж оруулна уу. Дутуу төлбөрөөр боловсруулалт эхлэхгүй.`,
+    await send(psid, `${head ? head + "\n\n" : ""}💳 Төлбөр: ${fmtMoney(inv.amount)}${promoLine(inv)}\n\n📲 QPay-ээр төлөх: утсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, боловсруулалт эхэлнэ.\n\n⚠️ Банкны апп дүнг автоматаар бөглөөгүй бол яг ${fmtMoney(inv.amount)} гэж оруулна уу. Дутуу төлбөрөөр боловсруулалт эхлэхгүй.`,
       [["✅ Төлсөн, шалгах", "FLOW_QPCHECK"], ...(f.url ? [["Материал нэмэх", "FLOW_MORE"]] : []), ["Цуцлах", "FLOW_CANCEL"]]);
     return true;
   } catch (e) {
@@ -409,6 +409,14 @@ async function handle({ psid, text, payload, attachments }) {
 }
 
 async function admin(payload) {
+  // Дутуу QPay төлбөрийг админ гараар батлах / хүлээх (PAYOK|QP:<нэхэмжлэх>)
+  const q = String(payload || "").match(/^(PAYOK|PAYNO)\|QP:([A-Z0-9]{6,60})$/);
+  if (q) {
+    if (q[1] === "PAYNO") { await send(ADMIN(), `⏳ ${q[2]}: үлдэгдлийг хүлээж байна. Бүтэн дүн орвол автоматаар эхэлнэ.`); return { ok: true }; }
+    const r = await QP.forceSettle(q[2]);
+    await send(ADMIN(), r === "paid" ? `✅ ${q[2]}: гараар баталлаа, ажил эхэллээ.` : r === "done" ? `ℹ️ ${q[2]}: аль хэдийн баталгаажсан байна.` : r === "busy" ? `ℹ️ ${q[2]}: яг одоо шалгагдаж байна, түр хүлээгээд дахин дарна уу.` : `⚠️ ${q[2]}: нэхэмжлэх олдсонгүй эсвэл цуцлагдсан.`);
+    return { ok: r === "paid" || r === "done" };
+  }
   try { const TN = require("../tender-v1/flow"); if (TN.isAdminPayload(payload)) return await TN.adminAction(payload); } catch (e) { console.warn("[flow] tender admin:", e.message); }
   const m = String(payload || "").match(/^(PAYOK|PAYNO)\|(.+)$/); if (!m) return { ok: false };
   const [, act, psid] = m, f = await getF(psid);
@@ -497,13 +505,26 @@ router.post("/qpay/invoice", express.json(), auth, async (req, res) => {
     setTimeout(async () => {
       try {
         if (inv.qrUrl) await sendImage(String(psid), inv.qrUrl);
-        await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, энд мэдэгдэнэ.\n\n⚠️ Банкны апп дүнг автоматаар бөглөөгүй бол яг ${fmtMoney(inv.amount)} гэж оруулна уу. Дутуу төлбөрөөр боловсруулалт эхлэхгүй.`,
+        await send(String(psid), `📲 QPay-ээр төлөх: ${fmtMoney(inv.amount)}${promoLine(inv)}\nУтсаараа доорх холбоосыг нээгээд банкны аппаа сонгоно уу (эсвэл дээрх QR кодыг уншуулна):\n${inv.short || ""}\n\nТөлбөр орж ирмэгц автоматаар баталгаажиж, энд мэдэгдэнэ.\n\n⚠️ Банкны апп дүнг автоматаар бөглөөгүй бол яг ${fmtMoney(inv.amount)} гэж оруулна уу. Дутуу төлбөрөөр боловсруулалт эхлэхгүй.`,
           kind === "bizrev" ? [["Цуцлах", "BIZ_CANCEL"]] : [["Цуцлах", "BIZ_CANCEL"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]]);
       } catch (e) { console.warn("[qpay] biz QR илгээх:", e.message); }
     }, Number(process.env.QPAY_BIZ_DELAY_MS || 4000));
   } catch (e) { console.warn("[qpay] biz нэхэмжлэх:", e.message); res.json({ ok: false, error: String(e.message).slice(0, 200) }); }
 });
 
+const promoLine = (inv) => (inv && inv.promo ? `\n🎟 «${inv.promo.code}» код: ${fmtMoney(inv.promo.before)} → ${fmtMoney(inv.promo.amount)}` : "");
+// Make дуудна: «код ...» гэсэн мессеж (админ — код үүсгэх/удирдах, захиалагч — идэвхжүүлэх). Хариуг энд илгээнэ.
+router.post("/promo/message", express.json(), auth, async (req, res) => {
+  const { psid, text } = req.body || {};
+  if (!psid) return res.status(400).json({ ok: false });
+  const P = require("./promo");
+  try {
+    if (P.isAdmin(psid)) { const out = P.adminCommand(text); if (out) { await send(String(psid), out); return res.json({ ok: true, admin: true }); } }
+    const r = P.redeem(String(psid), text);
+    await send(String(psid), r.msg, r.ok ? MENU : undefined);
+    res.json({ ok: r.ok });
+  } catch (e) { console.warn("[promo]", e.message); res.json({ ok: false, error: e.message }); }
+});
 const parseAtt = (a) => { if (typeof a === "string") { try { return JSON.parse(a); } catch (_) { return []; } } return Array.isArray(a) ? a : []; };
 router.post("/flow/message", express.json({ limit: "1mb" }), auth, async (req, res) => {
   const b = req.body || {};

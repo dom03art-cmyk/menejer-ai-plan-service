@@ -83,6 +83,9 @@ async function createInvoice({ psid, amount, description, kind = "flow", meta = 
   if (!enabled()) throw new Error("QPay тохируулаагүй");
   amount = Math.round(Number(amount));
   if (!(amount > 0)) throw new Error("QPay дүн буруу");
+  // Хөнгөлөлтийн код (захиалагч идэвхжүүлсэн бол)
+  let promo = null; try { promo = require("./promo").apply(String(psid), kind, meta, amount); } catch (e) { console.warn("[qpay] promo:", e.message); }
+  if (promo) amount = promo.amount;
   const no = `MA${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`.toUpperCase(); // давтагдашгүй
   const body = {
     invoice_code: process.env.QPAY_INVOICE_CODE, sender_invoice_no: no, invoice_receiver_code: "terminal",
@@ -91,7 +94,7 @@ async function createInvoice({ psid, amount, description, kind = "flow", meta = 
   };
   const j = await api("POST", "/v2/invoice", body);
   if (!j.invoice_id) throw new Error("QPay invoice_id ирсэнгүй");
-  const rec = { no, id: j.invoice_id, psid: String(psid), amount, kind, meta, status: "open", at: Date.now(), short: j.qPay_shortUrl || null };
+  const rec = { no, id: j.invoice_id, psid: String(psid), amount, kind, meta, status: "open", at: Date.now(), short: j.qPay_shortUrl || null, promo };
   await saveInv(rec);
   if (j.qr_image) await put(`qpqr:${no}`, { png: j.qr_image });
   // Нэг захиалагчид нэг төрлийн нэг л нээлттэй нэхэмжлэх: хуучныг цуцална (хуучин QR-аар төлөх боломжгүй болно)
@@ -143,6 +146,7 @@ async function settle(no, via = "callback") {
     }
     rec.status = "paid"; rec.paidAt = Date.now(); rec.payment_id = payment_id; rec.paid = paid; await saveInv(rec);
     console.log(`[qpay] ${no} төлөгдлөө ${paid}₮ (${rec.kind}, ${via})`);
+    if (rec.promo) { try { require("./promo").consume(rec.psid, rec.promo.code); } catch (e) { console.warn("[qpay] promo consume:", e.message); } }
     const h = handlers[rec.kind];
     if (h) await h(rec).catch((e) => console.error("[qpay] handler алдаа", e));
     return "paid";
@@ -155,8 +159,33 @@ async function partialNotice(rec, paid) {
   const { fbText } = require("../plan-v2/util");
   const rest = rec.amount - paid;
   await fbText(rec.psid, `⚠️ Таны төлбөрөөс ${money(paid)} орж ирлээ. Нэхэмжлэхийн дүн ${money(rec.amount)} тул ${money(rest)} дутуу байна. Бүтэн дүн орсны дараа л боловсруулалт эхэлнэ.\n\nМенежер тань шалгаад удахгүй холбогдоно. Төлөхдөө банкны апп дүнг автоматаар бөглөөгүй бол дүнг яг нэхэмжлэхийн дагуу оруулна уу.`);
-  if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `⚠️ Дутуу төлбөр\nЗахиалагч: ${rec.psid}\nТөрөл: ${rec.kind}\nНэхэмжлэх: ${rec.no}\nДүн: ${money(rec.amount)}, орсон: ${money(paid)}, дутуу: ${money(rest)}\n\nbusiness.qpay.mn-ээс шалгаад захиалагчтай холбогдоно уу (үлдэгдлийг авах эсвэл буцаах).`);
+  if (process.env.ADMIN_PSID) await qsend(process.env.ADMIN_PSID, `⚠️ Дутуу төлбөр\nЗахиалагч: ${rec.psid}\nТөрөл: ${rec.kind}\nНэхэмжлэх: ${rec.no}\nДүн: ${money(rec.amount)}, орсон: ${money(paid)}, дутуу: ${money(rest)}\n\n«✅ Эхлүүлэх» — орсон дүнгээр нь батлаад ажлыг эхлүүлнэ (нэхэмжлэх хаагдана, давхар эхлэхгүй).\n«⏳ Хүлээх» — үлдэгдлийг хүлээнэ; бүтэн орвол автоматаар эхэлнэ.`, [["✅ Эхлүүлэх", `PAYOK|QP:${rec.no}`], ["⏳ Хүлээх", `PAYNO|QP:${rec.no}`]]);
 }
+// Товчтой мессеж (админд)
+async function qsend(psid, text, buttons) {
+  const token = process.env.FB_PAGE_TOKEN; if (!token) return;
+  const msg = { text: String(text).slice(0, 1990) };
+  if (buttons) msg.quick_replies = buttons.map(([title, payload]) => ({ content_type: "text", title: title.slice(0, 20), payload }));
+  const r = await fetchImpl(`https://graph.facebook.com/v21.0/me/messages?access_token=${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: { id: String(psid) }, messaging_type: "RESPONSE", message: msg }) });
+  if (r && !r.ok) console.warn("[qpay] fb", r.status);
+}
+// Админ дутуу төлбөрийг гараар батлах: орсон дүнгээр «төлөгдсөн» болгож handler дуудна. Буцаах: "paid" | "done" | "missing" | "busy"
+async function forceSettle(no) {
+  const rec = await getInv(no); if (!rec) return "missing";
+  if (rec.status === "paid") return "done";
+  if (rec.status !== "open") return "missing";
+  if (!(await lock(`qplock:${no}`))) return "busy";
+  try {
+    let paid = rec.partial || 0; try { paid = (await paidAmount(rec)).paid; } catch (_) { }
+    rec.status = "paid"; rec.paidAt = Date.now(); rec.paid = paid; rec.forced = true; await saveInv(rec);
+    console.log(`[qpay] ${no} админ гараар баталлаа ${paid}/${rec.amount}₮ (${rec.kind})`);
+    if (rec.promo) { try { require("./promo").consume(rec.psid, rec.promo.code); } catch (_) { } }
+    const h = handlers[rec.kind];
+    if (h) await h(rec).catch((e) => console.error("[qpay] handler алдаа", e));
+    return "paid";
+  } finally { await unlock(`qplock:${no}`); }
+}
+
 // QPay callback (GET эсвэл POST). Хурдан 200 буцааж, шалгалтыг араас хийнэ. Хуурамч дуудлага ирсэн ч payment/check-ээр шалгадаг тул аюулгүй.
 async function callback(req, res) {
   const no = String(req.query.no || "").slice(0, 60);
@@ -223,4 +252,4 @@ router.get("/qpay/test", async (req, res) => {
 // Зөвхөн манай хадгалсан төлөвийг уншина (QPay руу дуудахгүй)
 router.get("/qpay/test/status/:no", async (req, res) => { const r = await getInv(String(req.params.no).slice(0, 60)).catch(() => null); res.json({ status: r && r.kind === "test" ? r.status : "missing" }); });
 
-module.exports = { cancelOpen, cbQuery, cbRecover, router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };
+module.exports = { forceSettle, cancelOpen, cbQuery, cbRecover, router, enabled, allowedFor, createInvoice, cancelInvoice, settle, onPaid, getInv, _setFetch: (f) => { fetchImpl = f; tok = null; } };
