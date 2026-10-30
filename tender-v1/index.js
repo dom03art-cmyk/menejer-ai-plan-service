@@ -36,14 +36,14 @@ function enqueue({ psid, kind, ...extra }) {
 }
 
 // Идэвхтэй ажлын жагсаалтыг үргэлж хадгална — сервер гэнэт унтарсан ч асахдаа дахин эхлүүлнэ
-function saveActive() { const list = [...jobs.values()].filter((j) => j.status === "running" || j.status === "queued").map((j) => ({ psid: j.psid, kind: j.kind })); require("./store").setMisc("interrupted", list).catch(() => { }); }
+function saveActive() { const list = [...jobs.values()].filter((j) => (j.status === "running" || j.status === "queued") && !j.cancel).map((j) => ({ psid: j.psid, kind: j.kind })); require("./store").setMisc("interrupted", list).catch(() => { }); }
 
 function pump() {
   while (running < MAX_PARALLEL && queue.length) {
     const job = queue.shift(); running++; job.status = "running"; job.usage = newUsage(); const t0 = Date.now();
     yieldToOthers(job).then(() => withUsage(job.usage, () => (job.kind === "analyze" ? runAnalyze(job) : runCompose(job))))
       .then(() => { job.status = "done"; })
-      .catch(async (e) => { job.status = e.status === "blocked" ? "blocked" : "failed"; job.error = e.message; console.error(`[tender ${job.id}] АЛДАА`, e); await require("./flow").onFailed(job, e).catch(() => { }); })
+      .catch(async (e) => { job.status = e.code === "cancelled" ? "cancelled" : e.status === "blocked" ? "blocked" : "failed"; job.error = e.message; if (e.code !== "cancelled") console.error(`[tender ${job.id}] АЛДАА`, e); await require("./flow").onFailed(job, e).catch(() => { }); })
       .finally(() => { const u = job.usage || {}; job.seconds = Math.round((Date.now() - t0) / 1000);
         console.log(`[tender ${job.id}] ${job.kind} ${job.status} ${job.outcome || ""} ${job.seconds}с | токен in ${u.input} out ${u.output} cache_w ${u.cache_write} cache_r ${u.cache_read} дуудлага ${u.calls}`);
         running--; activeByPsid.delete(job.psid); job.finishedAt = Date.now(); saveActive(); pump(); });
@@ -74,7 +74,15 @@ setTimeout(async () => {
   try {
     const S = require("./store"), cut = (await S.getMisc("interrupted")) || []; if (!cut.length) return;
     await S.setMisc("interrupted", []);
-    for (const c of cut) { const r = enqueue(c); console.log(`[tender] тасарсан ажлыг сэргээв: ${c.kind} ${c.psid} → ${r.status || r.error}`); }
+    const allow = String(process.env.TENDER_ALLOW_PSIDS || "").split(",").map((x) => x.trim()).filter(Boolean);
+    for (const c of cut) {
+      // Туршигчийн тасарсан ажлыг автоматаар сэргээхгүй (зардал гаргахгүй) — нүдний хуудас руу буцаана
+      if (allow.includes(String(c.psid)) && process.env.TENDER_RESUME_TESTERS !== "1") {
+        const st = (await S.getState(c.psid)) || {};
+        if (["tnd_composing", "tnd_analyzing"].includes(st.s)) await S.setState(c.psid, { ...st, s: c.kind === "compose" ? "tnd_slots" : st.s === "tnd_analyzing" ? "tnd_left" : st.s });
+        console.log(`[tender] туршигчийн тасарсан ажлыг сэргээсэнгүй: ${c.kind} ${c.psid}`); continue;
+      }
+      const r = enqueue(c); console.log(`[tender] тасарсан ажлыг сэргээв: ${c.kind} ${c.psid} → ${r.status || r.error}`); }
   } catch (e) { console.warn("[tender] сэргээх:", e.message); }
 }, Number(process.env.TENDER_RESUME_DELAY_MS || 20000)).unref();
 setInterval(() => { const now = Date.now(); for (const [id, j] of jobs) if (j.finishedAt && now - j.finishedAt > 24 * 3600e3) jobs.delete(id); }, 3600e3).unref();
@@ -82,4 +90,6 @@ setInterval(() => { const now = Date.now(); for (const [id, j] of jobs) if (j.fi
 module.exports = router;
 module.exports.enqueue = enqueue;
 module.exports._jobs = jobs;
+// Явж буй ажлыг зогсоох (дараагийн алхмын өмнө зогсоно)
+module.exports.cancel = (psid) => { const id = activeByPsid.get(String(psid)), j = id && jobs.get(id); if (!j) return false; j.cancel = true; if (j.status === "queued") { const i = queue.indexOf(j); if (i >= 0) queue.splice(i, 1); j.status = "cancelled"; activeByPsid.delete(j.psid); } saveActive(); return true; };
 module.exports.isActive = (psid) => activeByPsid.has(String(psid));

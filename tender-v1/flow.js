@@ -178,8 +178,20 @@ async function startCompose(psid, { reds } = {}) {
   await S.setState(psid, { ...st, s: "tnd_composing", forcedReds: reds || null, composeAt: Date.now() });
   await enqueue(psid, "compose");
   const n = reds ? reds.attach.length + reds.data.length + reds.fail.length : 0;
-  await send(psid, `Материалыг бэлтгэж эхэллээ ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ.${n ? ` (${n} зүйл дутуу байгааг мэдэж байж гаргахыг сонгосон.)` : ""}`);
+  await send(psid, `Материалыг бэлтгэж эхэллээ ⏳ 20–40 минут болно. Бэлэн болмогц файлаар илгээнэ.${n ? ` (${n} зүйл дутуу байгааг мэдэж байж гаргахыг сонгосон.)` : ""}\n\nСанамсаргүй дарсан бол «⏹ Зогсоох».`, [STOP_BTN]);
 }
+
+// Явж буй боловсруулалтыг зогсоох: ажлыг цуцалж, нүдний хуудас руу буцаана (эрх хасагдахгүй)
+async function stopJob(psid, st) {
+  require("./index").cancel(psid);
+  const back = st.s === "tnd_composing" ? "tnd_slots" : "tnd_left";
+  await S.setState(psid, { ...st, s: back });
+  console.log(`[tender] ${psid}: оролцогч ${st.s} зогсоов`);
+  if (back === "tnd_slots") await send(psid, `⏹ Материал бэлтгэхийг зогсоолоо. Таны оруулсан мэдээлэл хадгалагдсан, гаргах эрх хасагдаагүй.\nХэрэгтэй үедээ хуудаснаасаа «Материал гаргах» дарна уу:\n${st.url || uploadUrl(psid)}`, [CANCEL_BTN]);
+  else { await send(psid, "⏹ Зогсоолоо."); await admin(`ℹ️ Тендер ${psid}: шинжилгээг оролцогч зогсоов.`); }
+  return "ext";
+}
+const STOP_BTN = ["⏹ Зогсоох", "TND_STOP"];
 
 const READY_BTN = [["✅ Бэлэн", "TND_READY"], CANCEL_BTN];
 
@@ -255,6 +267,7 @@ async function handle({ psid, text, payload, attachments }) {
 
     case "tnd_analyzing":
     case "tnd_composing":
+      if (payload === "TND_STOP" || payload === "TND_CANCEL" || /зогсоо|цуцл|болиул|stop/i.test(text)) return stopJob(psid, st);
       // Ажил энэ процесст явахгүй байвал (сервер дахин ассан г.м.) дахин эхлүүлнэ
       if (!require("./index").isActive(psid)) { try { await enqueue(psid, st.s === "tnd_analyzing" ? "analyze" : "compose"); } catch (e) { console.warn("[tender] сэргээх:", e.message); } }
       if (atts.length) { const n = await saveAttachments(psid, atts); if (n) { await send(psid, `${n} файл хүлээн авлаа ✅ Боловсруулалт дууссаны дараа ашиглана.`); return "ext"; } }
@@ -305,6 +318,7 @@ try {
 // Шинжилгээ / материал дууссаны дараа (index.js дуудна) — алдаа гарвал
 async function onFailed(job, e) {
   const st = (await S.getState(job.psid)) || {};
+  if (e.code === "cancelled") return; // stopJob өөрөө төлөв, мессежийг шийднэ
   const back = job.kind === "compose" ? "tnd_slots" : st.s;
   await S.setState(job.psid, { ...st, s: back });
   if (e.status === "blocked") { await send(job.psid, require("../plan-v2/guard").CUSTOMER_MSG); await admin(`⛔ Тендер захиалгыг хаалаа (${job.psid}): ${String(e.message).slice(0, 300)}`); return; }
