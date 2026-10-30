@@ -110,6 +110,16 @@ async function toPaid(psid, lot) {
   await F.startCompose("ADMIN", {}); await idle();
   ok((await S.getState("ADMIN")).delivered === 1, "туршилтын хуудаснаас материал гарав");
 
+  console.log("9) Санамсаргүй эхэлсэн боловсруулалтыг зогсоох");
+  MOCK.reset(); await say("ADMIN", { text: "тендер-хуудас" });
+  await F.startCompose("ADMIN", {});
+  ok(msgs("ADMIN").slice(-1)[0].buttons.includes("⏹ Зогсоох"), "«Зогсоох» товч ирэв");
+  ok((await say("ADMIN", { payload: "TND_STOP" })) === "ext" && (await S.getState("ADMIN")).s === "tnd_slots", "зогсоогоод нүдний хуудас руу буцав");
+  await idle();
+  const stS = await S.getState("ADMIN");
+  ok(stS.s === "tnd_slots" && !msgs("ADMIN").slice(-3).some((m) => m.file) && lastJob().status === "cancelled", "материал гараагүй, ажил цуцлагдсан");
+  ok(!(stS.runs > 1), "гаргах эрх хасагдаагүй");
+
   console.log(fails ? `\nАЛДАА: ${fails}` : "\nБүх шалгалт амжилттай");
   process.exit(fails ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });

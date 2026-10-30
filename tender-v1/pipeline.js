@@ -44,7 +44,7 @@ async function guard(text) { if (process.env.TENDER_MOCK === "1") return; const 
 
 // ===================== A =====================
 async function runAnalyze(job, log = console.log) {
-  const { psid } = job, step = (s) => { job.step = s; log(`[tender ${job.id}] ${s}`); };
+  const { psid } = job, step = (s) => { if (job.cancel) { const e = new Error("Оролцогч зогсоосон"); e.code = "cancelled"; throw e; } job.step = s; log(`[tender ${job.id}] ${s}`); };
   const st = (await S.getState(psid)) || {};
   step("A1/4 файл уншиж байна");
   const { docs, files } = await readAll(psid, { log, mock: job.mockRead });
@@ -132,7 +132,7 @@ function kaseValues(k) { return (k && k.values) || {}; }
 
 // ===================== B =====================
 async function runCompose(job, log = console.log) {
-  const { psid } = job, step = (s) => { job.step = s; log(`[tender ${job.id}] ${s}`); };
+  const { psid } = job, step = (s) => { if (job.cancel) { const e = new Error("Оролцогч зогсоосон"); e.code = "cancelled"; throw e; } job.step = s; log(`[tender ${job.id}] ${s}`); };
   const st = (await S.getState(psid)) || {}, kase = await S.getCase(psid);
   if (!kase || !kase.base || !kase.slots) throw new Error("Шинжилгээний үр дүн алга (хугацаа дууссан байж магадгүй)");
   const SL = require("./slots");
