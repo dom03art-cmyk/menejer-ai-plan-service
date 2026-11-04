@@ -23,7 +23,7 @@ function buildXlsx(A, an, opt = {}) {
   const R = stressed ? run(A, { vol_mult: st.vol, price_mult: st.price, mat_mult: st.mat, fixed_mult: st.fixed }) : an.R;
   const E = { npv: npvFn(A.disc, R.fcf), irr: irrFn(R.fcf), pb: paybackFn(R.fcf), cum: [] }; R.fcf.reduce((a, c) => { E.cum.push(a + c); return a + c; }, 0);
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Менежер AI"; wb.created = new Date();
+  wb.creator = ""; wb.created = new Date();
   wb.calcProperties = { fullCalcOnLoad: true };
   const checks = [];
   const chk = (sheet, addr, expected, label) => checks.push({ sheet, addr, expected, label });
