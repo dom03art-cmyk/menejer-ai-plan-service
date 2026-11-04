@@ -10,7 +10,7 @@ function buildXlsx(meta, m, res, P = null) {
   const ExcelJS = require("exceljs");
   const org = meta.org_name || res.org_name, unit = meta.unit_name || res.unit_name || "", Y = res.year, NY = Y + 1;
   const COLS = P ? P.periods : MN, NC = COLS.length, PL = P ? P.full : `${NY} он`, PG = P ? P.full.replace(/ \(.*\)$/, "") : `${NY} оны`;
-  const wb = new ExcelJS.Workbook(); wb.creator = "Менежер AI"; wb.created = new Date(); wb.calcProperties = { fullCalcOnLoad: true };
+  const wb = new ExcelJS.Workbook(); wb.creator = ""; wb.created = new Date(); wb.calcProperties = { fullCalcOnLoad: true };
   const font = (o = {}) => ({ name: "Times New Roman", size: 11, ...o });
   const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
   const thin = { style: "thin", color: { argb: "FFBFBFBF" } }, B = { left: thin, right: thin, top: thin, bottom: thin };

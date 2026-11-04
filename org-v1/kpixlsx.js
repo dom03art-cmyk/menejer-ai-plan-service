@@ -33,7 +33,7 @@ function buildXlsx(meta, m, res) {
   meta = meta || {};
   const org = meta.org_name || res.org_name, unitName = meta.unit_name || res.unit_name || "", Y = res.year, ind = res.indicators, cov = new Set(res.months_covered);
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Менежер AI"; wb.created = new Date(); wb.calcProperties = { fullCalcOnLoad: true };
+  wb.creator = ""; wb.created = new Date(); wb.calcProperties = { fullCalcOnLoad: true };
   const checks = [];
   const chk = (sheet, r, cc, expected, label, tol = 1e-6) => { if (expected === undefined || (typeof expected === "number" && !Number.isFinite(expected))) return; checks.push({ sheet, addr: `${col(cc)}${r}`, expected, label, tol }); };
 
