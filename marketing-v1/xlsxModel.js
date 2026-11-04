@@ -20,7 +20,7 @@ function buildXlsx(A, cfg, calc) {
   const season = pad(cfg.seasonality), ramp = pad(cfg.efficiency_ramp);
   const brand = (A.brand && A.brand.name) || "";
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Менежер AI"; wb.created = new Date(); wb.calcProperties = { fullCalcOnLoad: true };
+  wb.creator = ""; wb.created = new Date(); wb.calcProperties = { fullCalcOnLoad: true };
   const checks = [];
   const chk = (sheet, r, c, expected, label, tol) => { if (expected === null || expected === undefined || typeof expected !== "number") return; checks.push({ sheet, addr: `${col(c)}${r}`, expected, label, tol }); };
 
