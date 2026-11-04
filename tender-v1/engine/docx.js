@@ -49,7 +49,7 @@ const kv = (pairs) => table(['Талбар', 'Оруулах утга'], pairs.m
 
 function doc(title, subtitle, children) {
   return new Document({
-    creator: 'Менежер Ai',
+    creator: '',
     title,
     styles: { default: { document: { run: { font: FONT, size: 24 } } } },
     sections: [{

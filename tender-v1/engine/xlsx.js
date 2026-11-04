@@ -145,7 +145,7 @@ function checklistSheet(wb, data, qc) {
 // Серверт: файл бичихгүй, workbook-ийг буцаана (томьёог plan-v2/xlsxCalc-аар бодож тулгана)
 function buildXlsx(data, qc) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'Менежер Ai';
+  wb.creator = '';
   const res = data.meta.type === 'goods' ? goodsSheet(wb, data, qc) : serviceSheet(wb, data, qc);
   checklistSheet(wb, data, qc);
   wb.eachSheet((ws) => base(ws));
