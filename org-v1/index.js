@@ -65,7 +65,7 @@ function pump() {
         }
         if (e.status === "blocked") {
           job.status = "blocked"; job.error = e.message; console.warn(`[org ${job.id}] ХААГДСАН`, e.message);
-          if (job.psid) await fbText(job.psid, require("../plan-v2/guard").CUSTOMER_MSG).catch(() => { });
+          if (job.psid) await fbText(job.psid, e.customerMsg || require("../plan-v2/guard").CUSTOMER_MSG).catch(() => { });
           if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `⛔ ${name} захиалгыг хаалаа (job ${job.id}, psid ${job.psid || "-"}): ${String(e.message).slice(0, 300)}. Төлбөрийг шалгаж, захиалагчтай холбогдоно уу.`).catch(() => { });
           await hook({ job_id: job.id, psid: job.psid, product: job.product, status: "blocked", error: e.message });
           return;
