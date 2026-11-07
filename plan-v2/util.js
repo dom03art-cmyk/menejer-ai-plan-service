@@ -24,10 +24,10 @@ function findPages(docxBuf, heads) {
 }
 
 // ---- qc.js: чанарын автомат шалгалт ----
-function qc({ an, text, heads, written }) {
+function qc({ an, text, heads, written, outline }) {
   const issues = [];
   if (written) {
-    const OUTLINE = require("./outline");
+    const OUTLINE = outline || require("./outline");
     const empty = OUTLINE.filter(o => o.group !== "static" && o.words && !(o.attach || []).length && !(written[o.id] || []).length).map(o => o.id);
     if (empty.length) issues.push(`Хоосон хэсэг: ${empty.join(", ")}`);
   }

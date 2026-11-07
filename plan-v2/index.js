@@ -6,6 +6,8 @@ const { runPipeline } = require("./pipeline");
 const { fbText } = require("./util");
 const { newUsage, withUsage } = require("./claude");
 const router = express.Router();
+// Бизнес төлөвлөгөө (mode=bplan) Make-ээр биш org-v1 урсгалаар явна: алдаа гарвал урсгалын төлөвийг сэргээнэ
+function bpFlowEnd(job, s) { if (!job.psid) return; try { require("../org-v1/flow")._setF(job.psid, { s }).catch(() => { }); } catch (_) { } }
 const jobs = new Map();          // id -> job
 const activeByPsid = new Map();  // psid -> id (давхар ажил үүсэхээс сэргийлнэ)
 const queue = []; let running = 0;
@@ -20,23 +22,24 @@ function pump() {
     withUsage(job.usage, () => runPipeline(job)).then(() => { job.status = "done"; })
       .catch(async (e) => {
         if (shuttingDown) return;
+        if (job.mode === "bplan") bpFlowEnd(job, e.status === "revision_rejected" ? "done" : "left");
         if (e.status === "revision_rejected") {
           job.status = "rejected";
-          if (process.env.MAKE_DONE_WEBHOOK) fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "revision_rejected", history: e.cleanedHistory || "" }) }).catch(() => { });
+          if (process.env.MAKE_DONE_WEBHOOK && job.mode !== "bplan") fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "revision_rejected", history: e.cleanedHistory || "" }) }).catch(() => { });
           return;
         }
         if (e.status === "blocked") {
           job.status = "blocked"; job.error = e.message; console.warn(`[${job.id}] ХААГДСАН`, e.message);
           if (job.psid) await fbText(job.psid, require("./guard").CUSTOMER_MSG).catch(() => { });
           if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, `⛔ Бизнес төслийн захиалгыг хаалаа (job ${job.id}, psid ${job.psid || "-"}): ${String(e.message).slice(0, 300)}. Төлбөрийг шалгаж, захиалагчтай холбогдоно уу.`).catch(() => { });
-          if (process.env.MAKE_DONE_WEBHOOK) fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "blocked", error: e.message }) }).catch(() => { });
+          if (process.env.MAKE_DONE_WEBHOOK && job.mode !== "bplan") fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "blocked", error: e.message }) }).catch(() => { });
           return;
         }
         job.status = "failed"; job.error = e.message; console.error(`[${job.id}] АЛДАА`, e);
         const credit = /credit balance/i.test(e.message || "");
         if (job.psid) await fbText(job.psid, credit ? "Уучлаарай, систем түр саатаж байна. Засагдмагц таны төслийг автоматаар боловсруулж илгээнэ. Хүлээсэнд баярлалаа 🙏" : "Уучлаарай, төсөл боловсруулахад техникийн саатал гарлаа. Та дурын мессеж бичиж дахин эхлүүлж болно, эсвэл манай ажилтан тантай удахгүй холбогдоно.").catch(() => { });
         if (process.env.ADMIN_PSID) await fbText(process.env.ADMIN_PSID, credit ? "⚠️ Anthropic API кредит дууссан! platform.claude.com → Billing хэсгээс кредит нэмнэ үү. Захиалагч хүлээгдэж байна." : `⚠️ Төсөл боловсруулахад алдаа гарлаа (job ${job.id}): ${String(e.message).slice(0, 300)}`).catch(() => { });
-        if (process.env.MAKE_DONE_WEBHOOK) fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "failed", error: e.message }) }).catch(() => { });
+        if (process.env.MAKE_DONE_WEBHOOK && job.mode !== "bplan") fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "failed", error: e.message }) }).catch(() => { });
       })
       .finally(() => { const u = job.usage || {}; console.log(`[${job.id}] токен: input ${u.input}, output ${u.output}, cache бичсэн ${u.cache_write}, cache уншсан ${u.cache_read}, web хайлт ${u.web_searches}, дуудлага ${u.calls}, max_tokens давталт ${u.max_tokens_retries}`); running--; if (job.psid) activeByPsid.delete(job.psid); job.finishedAt = Date.now(); pump(); });
   }
@@ -70,10 +73,11 @@ if (process.env.PLAN_MOCK !== "1") setTimeout(() => releaseHeld().catch((e) => c
 // body: { psid, conversation } эсвэл { psid, assumptions } ; notify:true бол эхлэх мессеж илгээнэ
 router.post("/jobs/plan", express.json({ limit: "2mb" }), auth, async (req, res) => {
   const { psid, conversation, assumptions, notify = true } = req.body || {};
+  const mode = req.body && req.body.mode === "bplan" ? "bplan" : undefined;
   if (!conversation && !assumptions) return res.status(400).json({ error: "conversation эсвэл assumptions шаардлагатай" });
   if (psid && activeByPsid.has(psid)) return res.status(202).json({ job_id: activeByPsid.get(psid), status: "already_running" });
   // Систем шинэчлэгдэж байх үед засварын хүсэлтийг хүлээлгэнэ: шинэчлэл дуусаад автоматаар ажиллана
-  if (psid && conversation && holding() && String(conversation).includes(REV_MARK)) {
+  if (psid && conversation && !mode && holding() && String(conversation).includes(REV_MARK)) {
     await store.holdSave(psid, conversation);
     console.log(`[hold] ${psid} засварын хүсэлтийг хүлээлгэв`);
     res.status(202).json({ status: "held" });
@@ -82,7 +86,7 @@ router.post("/jobs/plan", express.json({ limit: "2mb" }), auth, async (req, res)
     return;
   }
   const id = crypto.randomUUID();
-  const job = { id, psid, conversation, assumptions, status: "queued", createdAt: Date.now() };
+  const job = { id, psid, conversation, assumptions, mode, status: "queued", createdAt: Date.now() };
   jobs.set(id, job); if (psid) activeByPsid.set(psid, id); queue.push(job);
   // Дарааллын байрлалаас хамааруулж хүлээх хугацааг тооцно (нэг төсөл ~40 мин, MAX_PARALLEL зэрэг)
   const ahead = running + queue.length - 1;             // энэ ажлаас өмнө байгаа (ажиллаж буй + дараалалд)
@@ -90,8 +94,9 @@ router.post("/jobs/plan", express.json({ limit: "2mb" }), auth, async (req, res)
   const lo = 30 + waves * 40, hi = 45 + waves * 40;
   res.status(202).json({ job_id: id, status: "queued", position: queue.length, eta_min: [lo, hi] });
   if (psid && notify) {
+    const noun = mode === "bplan" ? (String(conversation || "").includes(REV_MARK) ? "засварыг" : "бизнес төлөвлөгөөг") : "бизнес төслийг";
     const msg = waves === 0
-      ? "Таны бизнес төслийг боловсруулж эхэллээ ⏳ Ойролцоогоор 30–45 минутын дараа PDF болон Word файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно."
+      ? (mode === "bplan" ? `Таны ${noun} боловсруулж эхэллээ ⏳ Ойролцоогоор 30–45 минутын дараа PDF, Word, Excel файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.` : null) || "Таны бизнес төслийг боловсруулж эхэллээ ⏳ Ойролцоогоор 30–45 минутын дараа PDF болон Word файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно."
       : `Таны захиалгыг хүлээн авлаа ✅ Одоогоор өөр захиалгууд боловсруулагдаж байгаа тул таны өмнө ${ahead} захиалга байна. Ойролцоогоор ${lo}–${hi} минутын дараа PDF болон Word файлаар илгээнэ. Энэ хооронд чатыг хаасан ч болно.`;
     fbText(psid, msg).catch(() => { });
   }
@@ -115,7 +120,7 @@ router.get("/jobs/:id/file", auth, (req, res) => {
 let shuttingDown = false;
 process.on("SIGTERM", async () => {
   if (shuttingDown) return; shuttingDown = true;
-  const pending = [...jobs.values()].filter(j => (j.status === "running" || j.status === "queued") && j.psid);
+  const pending = [...jobs.values()].filter(j => (j.status === "running" || j.status === "queued") && j.psid && j.mode !== "bplan");
   console.log(`[shutdown] ${pending.length} дуусаагүй ажлыг Make-д мэдэгдэж байна`);
   if (process.env.MAKE_DONE_WEBHOOK) {
     await Promise.allSettled(pending.map(j => fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" },

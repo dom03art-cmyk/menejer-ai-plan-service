@@ -21,6 +21,12 @@ const { loadPlan, savePlan } = require("./store");
 const { writeSection } = require("./chapters");
 const { callJSON } = require("./claude");
 const OUTLINE = require("./outline");
+const BPL = require("./outline-bplan");
+const { STYLE } = require("./chapters");
+const isBP = (job) => job.mode === "bplan";
+const outlineOf = (job, A) => (isBP(job) ? BPL.outlineFor(A) : OUTLINE);
+const styleOf = (job) => (isBP(job) ? BPL.styleFor(STYLE) : undefined);
+const planKey = (job) => (isBP(job) ? `${job.psid}:bp` : job.psid);
 
 function makeFin(an, rv, res) {
   const fin = build(an);
@@ -41,8 +47,9 @@ async function runFull(job, step, log) {
   const rv = await review(A0, analyse(A0), res, job.conversation, (m) => log(`[${job.id}] ${m}`));
   const fin = makeFin(rv.an, rv, res);
   step("4/7 бүлгүүдийг бичиж байна");
-  const written = await writeAll({ A: rv.A, facts: fin.facts, research: res, conversation: job.conversation }, undefined, (g) => log(`[${job.id}]   ✓ ${g}`));
-  return { A: rv.A, an: rv.an, rv, res, written };
+  const outline = outlineOf(job, rv.A);
+  const written = await writeAll({ A: rv.A, facts: fin.facts, research: res, conversation: job.conversation, outline, style: styleOf(job) }, undefined, (g) => log(`[${job.id}]   ✓ ${g}`));
+  return { A: rv.A, an: rv.an, rv, res, written, outline };
 }
 
 // Санхүүгийн тоо иш татдаг хэсгүүд — таамаглал өөрчлөгдвөл эдгээрийг заавал шинэчилнэ
@@ -58,6 +65,7 @@ const PLANNER = `Чи бизнес төслийн засварын төлөвл�
 
 async function runRevision(job, prev, step, log) {
   const conv = job.conversation;
+  const WRITABLE = outlineOf(job, prev.A).filter(o => o.group !== "static" && (o.words || o.guide));
   // Нөөц төсөв нэмэгдэхээс өмнө хүргэсэн төсөл: засварын үед тоо өөрчлөгдөхгүй байхаар 0 хэвээр үлдээнэ
   if (prev.A && prev.A.contingency_rate === undefined) prev.A.contingency_rate = 0;
   // Татварын шинэ горимоос өмнө хүргэсэн төсөл: тоо өөрчлөгдөхгүй байхаар хуучин горимоор үлдээнэ (санхүүгийн таамаглал өөрчлөгдвөл шинэ горимд шилжинэ)
@@ -87,7 +95,7 @@ async function runRevision(job, prev, step, log) {
   step(`3/5 ${ids.length} хэсгийг засаж байна`);
   const written = { ...prev.written };
   const items = WRITABLE.filter(o => ids.includes(o.id));
-  const ctx = { A, facts: fin.facts, research: prev.res || { macro: [], market: [] }, conversation: conv };
+  const ctx = { A, facts: fin.facts, research: prev.res || { macro: [], market: [] }, conversation: conv, style: styleOf(job) };
   let k = 0;
   async function worker() {
     while (k < items.length) {
@@ -100,7 +108,26 @@ async function runRevision(job, prev, step, log) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(3, items.length) }, worker));
-  return { A, an: rv.an, rv, res: prev.res || { macro: [], market: [] }, written };
+  return { A, an: rv.an, rv, res: prev.res || { macro: [], market: [] }, written, outline: outlineOf(job, A) };
+}
+
+// Бизнес төлөвлөгөөг хүргэх (Make-ээр биш, шууд Messenger-ээр)
+async function sendBP(job, A, an, rv, doc, fname) {
+  if (job.pdf) await fbFile(job.psid, job.pdf, fname.replace(/\.docx$/, ".pdf"), "application/pdf");
+  await fbFile(job.psid, doc.buffer, fname);
+  let xlsxSent = false;
+  if (job.xlsx) { try { await fbFile(job.psid, job.xlsx, fname.replace(/-biznes-tuluvluguu-/, "-sankhuugiin-zagvar-").replace(/\.docx$/, ".xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); xlsxSent = true; } catch (_) { } }
+  const rev = (job.conversation || "").includes(REV_MARK);
+  const adj = rv.changes.length ? `\n\n🔧 Санхүүгийн тооцоог бодит зах зээлийн түвшинд тааруулахын тулд зарим таамаглалыг өөрчилсөн (4.1-р хэсэгт жагсаасан): ${rv.changes.slice(0, 4).join("; ")}.` : "";
+  const warn = rv.viable ? "" : "\n\n❗ Анхааруулга: Таны өгсөн мэдээллээр санхүүгийн үр дүн сул гарч байна (цэвэр өнөөгийн үнэ цэнэ сөрөг эсвэл мөнгөн үлдэгдэл хасах). 4-р бүлэгт бодит тоог харуулж, сайжруулах арга хэмжээг санал болгосон.";
+  const missing = (A.missing_info || []).length ? `\n\n📝 Дутуу мэдээлэл — дараах зүйлсийг өөрөө нөхөж бичнэ үү: ${A.missing_info.join(", ")}.` : "";
+  await fbText(job.psid, rev ? `✅ Засвар хийгдлээ. Дээрх файлууд нь таны бизнес төлөвлөгөөний засварласан хувилбар.${adj}${warn}` : `✅ Таны бизнес төлөвлөгөө бэлэн боллоо! PDF-ийг утсан дээрээ уншихад, Word-ыг засварлахад ашиглана уу.${xlsxSent ? "\n📊 Томьёотой Excel санхүүгийн загвар хавсаргасан — тоогоо өөрчлөхөд тооцоо автоматаар шинэчлэгдэнэ." : ""}
+
+⚠️ Чухал: Төлөвлөгөөг таны өгсөн мэдээлэл болон нээлттэй эх сурвалжийн судалгаанд үндэслэн бэлтгэсэн. Хэрэгжүүлэхээсээ өмнө:
+1. Бүх тоо (үнэ, өртөг, цалин, түрээс, борлуулалт) таны бодит мэдээлэлтэй таарч байгаа эсэхийг шалгана уу.
+2. «[Захиалагч бөглөнө]» гэж тэмдэглэсэн хэсгүүдийг нөхөж бичнэ үү.
+3. 4-р бүлгийн «Таамаглал» гэж тэмдэглэсэн тоонуудыг өөрийн бодит тоогоор солино уу.
+4. 5.3-т байгаа гол үзүүлэлтийн самбараар сар бүр гүйцэтгэлээ хянаарай.${missing}${adj}${warn}`);
 }
 
 async function runPipeline(job, log = console.log) {
@@ -129,7 +156,7 @@ async function runPipeline(job, log = console.log) {
   // Засвар бол өмнөх төслийн төлөвийг ачаалж, зөвхөн хамааралтай хэсгүүдийг дахин бичнэ (бүтэн төсөл дахин бичихгүй)
   let core = null;
   if (job.conversation && job.psid && job.conversation.includes(REV_MARK) && process.env.PLAN_FULL_REVISION !== "1") {
-    const prev = await loadPlan(job.psid);
+    const prev = await loadPlan(planKey(job));
     if (prev) {
       try { core = await runRevision(job, prev, step, log); }
       catch (e) { if (/credit balance/i.test(e.message || "")) throw e; log(`[${job.id}] хэсэгчилсэн засвар амжилтгүй, бүтэн төслөөр үргэлжилнэ: ${e.message}`); core = null; }
@@ -137,11 +164,12 @@ async function runPipeline(job, log = console.log) {
   }
   if (!core) core = await runFull(job, step, log);
   const { A, an, rv, res } = core;
+  const OUT = core.outline || OUTLINE, BP = isBP(job), variant = BP ? "bplan" : undefined;
   const written = { ...core.written };
   const fin = makeFin(an, rv, res);
   job.feasibility = fin.facts.feasibility;
   // Дараагийн засварт ашиглах төлөвийг хадгална (4.1-ийн анхааруулгын хайрцаггүйгээр)
-  if (job.psid && process.env.PLAN_MOCK !== "1") await savePlan(job.psid, { A, res, written, rv: { viable: rv.viable, changes: rv.changes, reason: rv.reason || "" }, conversation: job.conversation || "", savedAt: new Date().toISOString() });
+  if (job.psid && process.env.PLAN_MOCK !== "1") await savePlan(planKey(job), { A, res, written, rv: { viable: rv.viable, changes: rv.changes, reason: rv.reason || "" }, conversation: job.conversation || "", savedAt: new Date().toISOString() });
   if (rv.changes.length) written["4.1"] = [...(written["4.1"] || [])];
   // Анхааруулгыг баримт бичигт биш, зөвхөн захиалагчийн мессежид өгнө (банкинд очих баримтад дотоод анхааруулга үлдээхгүй)
   if (rv.changes.length) (written["4.1"] = written["4.1"] || []).push({ type: "box", title: "Боломжийн шалгалтаар шинэчилсэн таамаглал", text: rv.changes.map((c, i) => `${i + 1}. ${c}`).join("\n") });
@@ -169,18 +197,18 @@ async function runPipeline(job, log = console.log) {
     setDocTheme(theme); setPdfTheme(theme); require("./charts").setTheme(theme);
     charts = await renderAll({ ...fin.charts, ...llmSpecs });
     step("6/7 Word угсарч байна");
-    doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: [] });
+    doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: [], outline: OUT, variant });
     if (hasSoffice()) {
       const fp = findPages(doc.buffer, doc.heads);
-      doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: fp.pages });
+      doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: fp.pages, outline: OUT, variant });
       text = fp.allText; nPages = fp.nPages;
     } else {
-      doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: null }); // Word "Update Field" гарчиг
+      doc = await buildDoc({ A, written: writtenDoc, fin, charts, pages: null, outline: OUT, variant }); // Word "Update Field" гарчиг
     }
-    job.qc = qc({ an, text, heads: doc.heads, written });
+    job.qc = qc({ an, text, heads: doc.heads, written, outline: OUT });
     // Утсан дээр уншихад зориулсан PDF (гарчиг бодит хуудасны дугаартай)
     try {
-      const pdf = await buildPdf({ A, written: writtenDoc, fin, charts });
+      const pdf = await buildPdf({ A, written: writtenDoc, fin, charts, outline: OUT, variant });
       job.pdf = pdf.buffer;
       nPages = nPages || (pdf.buffer.toString("latin1").match(/\/Type\s*\/Page[^s]/g) || []).length;
     } catch (e) { log(`[${job.id}] PDF үүсгэж чадсангүй: ${e.message}`); job.qc.push("PDF үүсгэж чадсангүй"); }
@@ -200,13 +228,14 @@ async function runPipeline(job, log = console.log) {
   step("7/7 илгээж байна");
   const TR = { а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "yo", ж: "j", з: "z", и: "i", й: "i", к: "k", л: "l", м: "m", н: "n", о: "o", ө: "u", п: "p", р: "r", с: "s", т: "t", у: "u", ү: "u", ф: "f", х: "kh", ц: "ts", ч: "ch", ш: "sh", щ: "sh", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya" };
   const slug = [...(A.company.name || "plan").toLowerCase()].map(c => TR[c] ?? c).join("").replace(/\b(khkhk|llc)\b/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "plan";
-  const fname = `${slug}-biznes-tusul-${new Date().toISOString().slice(0, 10)}.docx`;
+  const fname = `${slug}-${BP ? "biznes-tuluvluguu" : "biznes-tusul"}-${new Date().toISOString().slice(0, 10)}.docx`;
   job.filename = fname;
-  if (job.psid && process.env.PLAN_MOCK !== "1") {
+  if (BP && job.psid && process.env.PLAN_MOCK !== "1") await sendBP(job, A, an, rv, doc, fname);
+  else if (job.psid && process.env.PLAN_MOCK !== "1") {
     if (job.pdf) await fbFile(job.psid, job.pdf, fname.replace(/\.docx$/, ".pdf"), "application/pdf");
     await fbFile(job.psid, doc.buffer, fname);
     let xlsxSent = false;
-    if (job.xlsx) { try { await fbFile(job.psid, job.xlsx, fname.replace(/-biznes-tusul-/, "-sankhuugiin-zagvar-").replace(/\.docx$/, ".xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); xlsxSent = true; } catch (e) { log(`[${job.id}] Excel илгээж чадсангүй: ${e.message}`); } }
+    if (job.xlsx) { try { await fbFile(job.psid, job.xlsx, fname.replace(/-biznes-(tusul|tuluvluguu)-/, "-sankhuugiin-zagvar-").replace(/\.docx$/, ".xlsx"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"); xlsxSent = true; } catch (e) { log(`[${job.id}] Excel илгээж чадсангүй: ${e.message}`); } }
     const adj = rv.changes.length ? `\n\n🔧 Санхүүгийн тооцоог бодит зах зээлийн түвшинд тааруулахын тулд дараах таамаглалыг өөрчилсөн (4.1-р хэсэгт дэлгэрэнгүй):\n${rv.changes.slice(0, 6).map((c, i) => `${i + 1}. ${c}`).join("\n")}` : "";
     const warn = rv.viable ? "" : `\n\n❗ Анхааруулга: Таны өгсөн мэдээллээр төсөл банкны шаардлагыг (зээл төлөх чадвар, ашигт ажиллагаа) хангахгүй гарсан. ${rv.reason || ""} Үнэ, борлуулалтын хэмжээ, зардал, зээлийн нөхцөлөө бодитоор шалгаад «засвар хийлгэх» сонголтоор дахин боловсруулуулна уу.`;
     let advice = "";
@@ -234,7 +263,8 @@ async function runPipeline(job, log = console.log) {
 
 Таны өгсөн мэдээлэл хэдий чинээ дэлгэрэнгүй, бодит байна төдий чинээ төсөл үнэн зөв гарна.${adj}${warn}${advice}`);
   }
-  if (process.env.MAKE_DONE_WEBHOOK && process.env.PLAN_MOCK !== "1") {
+  if (BP && job.psid) { try { await require("../org-v1/flow").onDone({ psid: job.psid, product: "bplan", revision: !!(job.conversation || "").includes(REV_MARK) }); } catch (e) { log(`[${job.id}] onDone: ${e.message}`); } }
+  else if (process.env.MAKE_DONE_WEBHOOK && process.env.PLAN_MOCK !== "1") {
     await fetch(process.env.MAKE_DONE_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job_id: job.id, psid: job.psid, status: "done", ...job.result, qc: job.qc }) }).catch(e => log("webhook алдаа " + e.message));
   }
   step("дууслаа");

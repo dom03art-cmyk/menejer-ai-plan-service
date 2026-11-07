@@ -61,12 +61,12 @@ ${ctx.conversation ? "ЗАХИАЛАГЧИЙН ӨГСӨН МЭДЭЭЛЭЛ (яр
     // Засвар: өмнөх хувилбарыг үндэс болгож, зөвхөн хүсэлтэд хамаарах хэсгийг өөрчилнө, санхүүгийн тоог шинэ тооноос авна
     user += `\n\nЗАСВАРЫН ХҮСЭЛТ (заавал тусга):\n${ctx.revision.request}\n\nЭНЭ ХЭСГИЙН ӨМНӨХ ХУВИЛБАР (блокууд):\n${JSON.stringify(ctx.revision.previous || []).slice(0, 30000)}\n\nӨмнөх хувилбарыг үндэс болгож, засварын хүсэлтэд хамаарах агуулгыг шинэчил. Хүсэлтэд хамааралгүй сайн агуулгыг хадгал. Бүх тоог дээрх "САНХҮҮГИЙН ТОО"-оос дахин шалгаж, зөрсөн тоог шинэчил. Хэсгийг бүтнээр нь (доод үгийн тоог хангаж) буцаа.`;
   }
-  const out = await callJSON({ system: STYLE, cached, user, maxTokens: Number(process.env.PLAN_SECTION_MAX_TOKENS || 24000) });
+  const out = await callJSON({ system: ctx.style || STYLE, cached, user, maxTokens: Number(process.env.PLAN_SECTION_MAX_TOKENS || 24000) });
   const sec = (out.sections || []).find(s => s.id === item.id) || (out.sections || [])[0];
   let blocks = sec ? cleanBlocks(sec.blocks || []) : [];
   // 2.4 хувилбарын харьцуулалт, 3.4 оролцогч талууд, 3.6 шийдвэрийн цэг — кодоор шалгаж засна. Алдаа гарвал AI-ийн бичсэнээр үлдэнэ.
   if (blocks.length && POST_IDS.has(item.id) && process.env.PLAN_EXTRAS !== "0") {
-    const gen = async (prompt) => { const o = await callJSON({ system: STYLE, cached, user: prompt, maxTokens: 6000 }); const s = (o.sections || [])[0]; return s ? cleanBlocks(s.blocks || []) : []; };
+    const gen = async (prompt) => { const o = await callJSON({ system: ctx.style || STYLE, cached, user: prompt, maxTokens: 6000 }); const s = (o.sections || [])[0]; return s ? cleanBlocks(s.blocks || []) : []; };
     try { blocks = await postProcess(item.id, blocks, ctx, gen, (m) => console.log(`[chapters] ${m}`)); }
     catch (e) { console.warn(`[chapters] ${item.id} нэмэлт шалгалт алгасав: ${e.message}`); }
   }
@@ -101,7 +101,7 @@ function cleanBlocks(blocks) {
 
 // Хэсгүүдийг хязгаартай зэрэгцээгээр бичнэ; хураангуй (ch1) хамгийн сүүлд
 async function writeAll(ctx, concurrency = Number(process.env.PLAN_CONCURRENCY || 3), onProgress = () => { }) {
-  const items = OUTLINE.filter(o => o.group !== "static" && (o.words || o.guide));
+  const items = (ctx.outline || OUTLINE).filter(o => o.group !== "static" && (o.words || o.guide));
   const order = [...items.filter(o => o.group !== "ch1"), ...items.filter(o => o.group === "ch1")];
   const firstCh1 = order.findIndex(o => o.group === "ch1");
   const result = {}; let idx = 0, done = 0;
@@ -125,4 +125,4 @@ async function writeAll(ctx, concurrency = Number(process.env.PLAN_CONCURRENCY |
   if (still.length > 2) throw new Error(`Хоосон хэсэг хэт олон (${still.join(", ")}) — дутуу төсөл илгээхгүй`);
   return result;
 }
-module.exports = { writeAll, writeSection, cleanBlocks, cleanStr };
+module.exports = { writeAll, writeSection, cleanBlocks, cleanStr, STYLE };

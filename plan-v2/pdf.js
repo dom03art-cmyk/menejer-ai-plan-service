@@ -71,20 +71,21 @@ function blocks(list, ctx) {
   return out;
 }
 
-async function buildPdf({ A, written, fin, charts }) {
+async function buildPdf({ A, written, fin, charts, outline, variant }) {
+  const BP = variant === "bplan", y0 = Number(A.start_year) || new Date().getFullYear();
   const ctx = { tableNo: 0, charts };
   const content = [
     { text: A.company.name.toUpperCase(), fontSize: 16, bold: true, color: NAVY, alignment: "center", margin: [0, 40, 0, 20] },
-    { text: "БАТАЛГААЖУУЛСАН:\nГүйцэтгэх захирал ______________\nОгноо: ____/____/______", alignment: "right", fontSize: 10, margin: [0, 0, 0, 150] },
-    { text: "БИЗНЕС ТӨСӨЛ", fontSize: 34, bold: true, color: NAVY, alignment: "center", margin: [0, 0, 0, 14] },
+    { text: `${BP ? "БАТЛАВ:" : "БАТАЛГААЖУУЛСАН:"}\nГүйцэтгэх захирал ______________\nОгноо: ____/____/______`, alignment: "right", fontSize: 10, margin: [0, 0, 0, 150] },
+    { text: BP ? "БИЗНЕС ТӨЛӨВЛӨГӨӨ" : "БИЗНЕС ТӨСӨЛ", fontSize: BP ? 30 : 34, bold: true, color: NAVY, alignment: "center", margin: [0, 0, 0, 14] },
     { text: A.project.title, fontSize: 14, alignment: "center", margin: [0, 0, 0, 20] },
     { canvas: [{ type: "line", x1: 100, y1: 0, x2: 390, y2: 0, lineWidth: 2, lineColor: GOLD }], margin: [0, 0, 0, 14] },
-    { text: `Зээлийн хүсэлт: ${Math.round(A.loan.amount).toLocaleString("en-US")} ₮ · ${A.loan.months} сар`, bold: true, alignment: "center", fontSize: 12 },
-    { text: `Санхүүжүүлэгч: ${A.project.funder || "—"}\nБайршил: ${A.project.location || "—"}`, alignment: "center", color: GREY, fontSize: 11, margin: [0, 6, 0, 0] },
+    { text: BP ? `Төлөвлөгөөний хугацаа: ${y0}–${y0 + 2} он${A.loan.amount > 0 ? `\nСанхүүжилтийн хэрэгцээ: ${Math.round(A.loan.amount).toLocaleString("en-US")} ₮` : ""}` : `Зээлийн хүсэлт: ${Math.round(A.loan.amount).toLocaleString("en-US")} ₮ · ${A.loan.months} сар`, bold: true, alignment: "center", fontSize: 12 },
+    { text: `${BP ? "" : `Санхүүжүүлэгч: ${A.project.funder || "—"}\n`}Байршил: ${A.project.location || "—"}`, alignment: "center", color: GREY, fontSize: 11, margin: [0, 6, 0, 0] },
     { text: `Улаанбаатар хот, ${new Date().getFullYear()} он`, alignment: "center", bold: true, absolutePosition: { x: 0, y: 760 } },
     { toc: { title: { text: "ГАРЧИГ", style: "h1" }, numberStyle: { bold: false } }, pageBreak: "before" },
   ];
-  for (const o of OUTLINE) {
+  for (const o of outline || OUTLINE) {
     const st = ["h1", "h2", "h3"][o.lvl - 1];
     content.push({ text: o.t, style: st, tocItem: true, tocMargin: [(o.lvl - 1) * 15, 0, 0, 0], tocStyle: o.lvl === 1 ? { bold: true, color: NAVY } : {}, pageBreak: o.lvl === 1 ? "before" : undefined });
     content.push(...blocks(written[o.id], ctx));

@@ -100,7 +100,8 @@ function renderBlocks(blocks, ctx) {
   return out;
 }
 
-function cover(A) {
+function cover(A, variant) {
+  if (variant === "bplan") return coverBP(A);
   const big = (t, size, color = NAVY, bold = true, after = 200) => new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after }, children: [new TextRun({ text: t, bold, size, color })] });
   return [
     big(A.company.name.toUpperCase(), 32, NAVY, true, 400),
@@ -117,10 +118,28 @@ function cover(A) {
   ];
 }
 
-async function buildDoc({ A, written, fin, charts, pages }) {
+function coverBP(A) {
+  const big = (t, size, color = NAVY, bold = true, after = 200) => new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after }, children: [new TextRun({ text: t, bold, size, color })] });
+  const y = Number(A.start_year) || new Date().getFullYear();
+  return [
+    big(A.company.name.toUpperCase(), 32, NAVY, true, 400),
+    new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: "БАТЛАВ:", bold: true, size: 22 })] }),
+    new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: "Гүйцэтгэх захирал ______________", size: 22 })] }),
+    new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 2400 }, children: [new TextRun({ text: "Огноо: ____/____/______", size: 22 })] }),
+    big("БИЗНЕС ТӨЛӨВЛӨГӨӨ", 64, NAVY, true, 300),
+    big(A.project.title, 30, "333333", false, 500),
+    new Paragraph({ alignment: AlignmentType.CENTER, border: { top: { style: "single", size: 18, color: GOLD, space: 8 } }, spacing: { after: 200 }, children: [] }),
+    big(`Төлөвлөгөөний хугацаа: ${y}–${y + 2} он`, 26),
+    ...(A.loan && A.loan.amount > 0 ? [big(`Санхүүжилтийн хэрэгцээ: ${Math.round(A.loan.amount).toLocaleString("en-US")} ₮`, 24, GREY, false)] : []),
+    big(`Байршил: ${A.project.location || "—"}`, 24, GREY, false, 3000),
+    big(`Улаанбаатар хот, ${new Date().getFullYear()} он`, 26),
+  ];
+}
+
+async function buildDoc({ A, written, fin, charts, pages, outline, variant }) {
   const ctx = { heads: [], tableNo: 0, charts };
   const body = [];
-  for (const o of OUTLINE) {
+  for (const o of outline || OUTLINE) {
     body.push(H(o.lvl, o.t, ctx.heads));
     body.push(...renderBlocks(written[o.id], ctx));
     for (const key of o.attach || []) {
@@ -138,7 +157,7 @@ async function buildDoc({ A, written, fin, charts, pages }) {
     : [new TableOfContents("Гарчиг", { hyperlink: true, headingStyleRange: "1-3" })];
   const doc = new Document({ styles: { default: { document: { run: { font: FONT } }, heading1: { run: { font: FONT } }, heading2: { run: { font: FONT } }, heading3: { run: { font: FONT } } } }, features: { updateFields: !pages },
     sections: [
-      { properties: { page: { size: A4, margin: MARGIN } }, children: cover(A) },
+      { properties: { page: { size: A4, margin: MARGIN } }, children: cover(A, variant) },
       { properties: { page: { size: A4, margin: MARGIN } }, headers: { default: header }, footers: { default: footer }, children: [tocTitle, ...toc] },
       { properties: { page: { size: A4, margin: MARGIN } }, headers: { default: header }, footers: { default: footer }, children: body },
     ] });
