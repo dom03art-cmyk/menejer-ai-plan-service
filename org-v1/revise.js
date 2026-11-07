@@ -32,7 +32,7 @@ const getLast = (psid) => get(`orglast:${psid}`).catch(() => null);
 const setLast = (psid, v) => put(`orglast:${psid}`, v).catch(() => { });
 
 // Нэмэлт засварын үнэ (1 дэх засвар үнэгүй)
-const REV_PRICE = { report_custom: 19900, report_dept: 19900, plan_dept: 19900, report_dir: 29900, plan: 29900 };
+const REV_PRICE = { report_custom: 19900, plan_custom: 19900, report_dept: 19900, plan_dept: 19900, report_dir: 29900, plan: 29900 };
 
 const PLANNER = `Чи байгууллагын тайлан, төлөвлөгөөний засварын төлөвлөгч. Захиалагчийн засварын хүсэлтийг уншаад ЗӨВХӨН JSON буцаа.
 1) actionable: хүсэлтэд тодорхой өөрчлөлт (засах, нэмэх, хасах, тоо солих, хэлбэр өөрчлөх) байвал true. "Баярлалаа", "за", "ойлголоо" гэх мэт өөрчлөлтгүй мессеж бол false.

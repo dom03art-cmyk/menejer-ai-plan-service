@@ -51,7 +51,7 @@ function dedupe(written, outline, fin) {
 }
 
 async function runOrg(job, log = console.log) {
-  if (job.product === "report_custom") return require("./custom").runCustom(job, log);
+  if (job.product === "report_custom" || job.product === "plan_custom") return require("./custom").runCustom(job, log);
   const t0 = Date.now(), P = job.product, step = (s) => { job.step = s; log(`[org ${job.id}] ${s} (${Math.round((Date.now() - t0) / 1000)}с)`); };
   if (!OUTLINES[P]) throw new Error(`Тодорхойгүй бүтээгдэхүүн: ${P}`);
   const guard = async (text) => { const g = await checkContent(text); if (!g.allowed) { log(`[org ${job.id}] ХААВ: ${g.category} — ${g.reason}`); throw blockedError(g); } };
