@@ -79,7 +79,7 @@ function redeem(psid, text) {
 function productOf(kind, meta) {
   if (kind === "biz") return "biz";
   if (kind === "tender") return "tender";
-  if (kind === "flow") return meta && meta.product === "marketing" ? "mkt" : "org";
+  if (kind === "flow") return meta && meta.product === "marketing" ? "mkt" : meta && meta.product === "bplan" ? "biz" : "org";
   return null; // засвар (bizrev), туршилт — хөнгөлөхгүй
 }
 function apply(psid, kind, meta, amount) {

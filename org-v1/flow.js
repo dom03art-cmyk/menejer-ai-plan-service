@@ -45,7 +45,7 @@ async function sendImage(psid, url) {
   const token = process.env.FB_PAGE_TOKEN; if (!token || !psid || !url) return;
   await fetch(`${GRAPH}?access_token=${token}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ recipient: { id: psid }, messaging_type: "RESPONSE", message: { attachment: { type: "image", payload: { url, is_reusable: false } } } }) }).catch(() => { });
 }
-const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]];
+const MENU = [["Бизнес төсөл", "BIZ_PROJECT"], ["Бизнес төлөвлөгөө", "BIZ_PLAN"], ["Маркетинг", "MKT_PLAN"], ["Тайлан, төлөвлөгөө", "ORG_REPORT"]];
 // tender-v1: TENDER_ENABLED=1 үед л цэсэнд «Тендерийн материал» нэмэгдэнэ
 const menuBtns = (psid) => (process.env.TENDER_ENABLED === "1" || String(process.env.TENDER_ALLOW_PSIDS || "").split(",").map((x) => x.trim()).includes(String(psid)) ? [...MENU, ["Тендерийн материал", "TENDER"]] : MENU);
 // Тайлан, төлөвлөгөөний цэс 2 алхамтай: эхлээд хэлтэс/байгууллага, дараа нь тайлан/төлөвлөгөө/багц
@@ -165,13 +165,22 @@ async function revMenu(psid) {
 }
 async function startRevJob(psid, f, text) {
   const base = `http://127.0.0.1:${process.env.PORT || 3000}`, headers = { "Content-Type": "application/json", "x-api-key": process.env.API_KEY || "" };
+  if (f.part === "bplan") {
+    const prev = await require("../plan-v2/store").loadPlan(`${psid}:bp`).catch(() => null);
+    if (!prev) throw new Error("өмнөх бизнес төлөвлөгөө олдсонгүй");
+    const r = await fetch(base + "/jobs/plan", { method: "POST", headers, body: JSON.stringify({ psid, mode: "bplan", conversation: `${prev.conversation || ""}\n\nЗасварын хүсэлт: ${text}` }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.job_id) throw new Error(j.error || `HTTP ${r.status}`);
+    await setF(psid, { s: "processing", job: j.job_id, jobKind: "plan", product: "bplan", rev: { part: "bplan" }, startedAt: Date.now() });
+    return;
+  }
   const r = await fetch(base + "/org/jobs", { method: "POST", headers, body: JSON.stringify({ psid, product: f.part, revision: text }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
   await setF(psid, { s: "processing", job: j.job_id, jobKind: "org", product: f.part, rev: { part: f.part }, startedAt: Date.now() });
 }
 
-const NAMES = { report_custom: PRODUCTS.report_custom.name, plan_custom: PRODUCTS.plan_custom.name, marketing: "Маркетингийн төлөвлөгөө", report_dept: PRODUCTS.report_dept.name, report_dir: PRODUCTS.report_dir.name, plan: PRODUCTS.plan.name, bundle: PRODUCTS.bundle.name, plan_dept: PRODUCTS.plan_dept.name, bundle_dept: PRODUCTS.bundle_dept.name };
+const NAMES = { bplan: "Бизнес төлөвлөгөө", report_custom: PRODUCTS.report_custom.name, plan_custom: PRODUCTS.plan_custom.name, marketing: "Маркетингийн төлөвлөгөө", report_dept: PRODUCTS.report_dept.name, report_dir: PRODUCTS.report_dir.name, plan: PRODUCTS.plan.name, bundle: PRODUCTS.bundle.name, plan_dept: PRODUCTS.plan_dept.name, bundle_dept: PRODUCTS.bundle_dept.name };
 const tiers = (p) => { const q = [5, 30, 80].map((u) => priceFor(p, u)); return `20 хүртэл хуудас: ${fmtMoney(q[0].price)} · 21–50: ${fmtMoney(q[1].price)} · 51–100: ${fmtMoney(q[2].price)}`; };
 const payInfo = () => process.env.PAY_INFO ? String(process.env.PAY_INFO).replace(/\\n/g, "\n") : null;
 
@@ -193,12 +202,26 @@ const INTERVIEW = `Чи «Менежер AI»-ийн маркетингийн т
 - Хангалттай мэдээлэл (1, 2, 4, 6, 7 заавал; бусад нь боломжтой бол) цугларсан эсвэл захиалагч "болсон, эхлүүл" гэвэл ready=true; reply-д цуглуулсан гол мэдээллийг 3–6 мөрөөр товч давтаж бич (үнэ, төлбөрийн мэдээллийг бичихгүй, код нэмнэ).
 Зөвхөн JSON: {"reply":"захиалагчид илгээх текст","ready":false,"blocked":false}`;
 
-async function interview(f, text) {
+// ---- Бизнес төлөвлөгөөний мэдээлэл цуглуулах ----
+const BP_PRICE = Number(process.env.BP_PRICE || 149900);
+const BP_INTERVIEW = `Чи «Менежер AI»-ийн БИЗНЕС ТӨЛӨВЛӨГӨӨ (бизнесээ удирдах, өсгөх 3 жилийн стратеги баримт) боловсруулах үйлчилгээний туслах. Захиалагчаас төлөвлөгөөнд хэрэгтэй мэдээллийг монгол хэлээр, найрсаг, аль болох ЦӨӨН мессежээр цуглуулна. Захиалагч эхний мессежээ бичсэний дараа дутуу байгаа бүх гол мэдээллийг НЭГ мессежид дугаарласан жагсаалтаар (хамгийн ихдээ 5 зүйл) нэг дор асууж, «нэг мессежид бүгдийг нь бичнэ үү» гэж хүс. Нэг нэгээр нь тасалж асуухгүй. Нийтдээ 2–3 удаагийн асуулт-хариултаар дуусгахыг зорь.
+Цуглуулах мэдээлэл: (1) бизнесийн нэр, юу хийдэг/хийх, байршил; (2) шинэ эсвэл ажиллаж байгаа бизнес — ажиллаж байгаа бол хэдэн жил, одоогийн сарын/жилийн борлуулалт, хэрэглэгчийн тоо; (3) бүтээгдэхүүн/үйлчилгээ, үнэ, нэгжийн өртөг (орц, түүхий эд); (4) хүчин чадал (өдөр/сард хэдийг үйлдвэрлэх, үйлчлэх); (5) ажилтны тоо, цалин; (6) сарын тогтмол зардал (түрээс, цахилгаан, шатахуун г.м.); (7) хөрөнгө оруулалт хийх төлөвлөгөө (тоног төхөөрөмж, байр) ба түүнийг юугаар санхүүжүүлэх — өөрийн хөрөнгө, ашиг, зээл (зээл бол дүн, хугацаа, хүү); (8) 3 жилийн гол зорилго (тоогоор бол илүү); (9) зорилтот хэрэглэгч, борлуулах суваг; (10) гол өрсөлдөгч (мэдэх бол).
+Дүрэм:
+- Захиалагч мэдэхгүй гэвэл шахахгүй, дараагийн асуулт руу шилж. Хэлсэн нэр, тоог өөрчлөхгүй. Мэдэхгүй тоог салбарын дунджаар таамаглаж «таамаглал» гэж тэмдэглэнэ гэдгийг зөвхөн захиалагч «мэдэхгүй» гэсэн үед хэл.
+- Хууль бус үйл ажиллагаа (мансууруулах бодис, зэвсэг, садар самуун, залилан, хууль бус наймаа) бол тусалж болохгүй гэж эелдгээр хэлээд ready=false, blocked=true.
+- Захиалагч «бизнес төсөл, бизнес төлөвлөгөө хоёр юугаараа ялгаатай» гэж асуувал: бизнес төсөл нь банк, сангаас зээл, санхүүжилт авахад зориулсан (зээлийн эргэн төлөлт, барьцаа, банкны шаардлагатай); бизнес төлөвлөгөө нь бизнесээ удирдах, өсгөх 3 жилийн стратеги, зорилт, үйл ажиллагаа, санхүүгийн төсөөлөл, гол үзүүлэлтийн хяналттай баримт гэж тайлбарла. Зээл авах гэж байгаа бол «Бизнес төсөл»-ийг сонгохыг зөвлө.
+- Үнэ асуувал: ${fmtMoney(BP_PRICE)} (50–70 хуудас, PDF + Word + томьёотой Excel санхүүгийн загвар, 1 удаа үнэгүй засвар).
+- ЭРГЭЛЗЭЭ, ЭСЭРГҮҮЦЭЛ: «үнэтэй», «яагаад хэрэгтэй», «өөрөө хийж болно», «бодъё» гэвэл тэр мессежид мэдээлэл ҮЛ асуу, итгүүлж хариул: юу авах (зах зээлийн судалгаа, 3 жилийн стратеги, үйл ажиллагааны хуваарь, санхүүгийн төсөөлөл, Excel загвар, хяналтын үзүүлэлт), яагаад хэрэгтэй (төлөвлөгөөгүй өсөлт ихэвчлэн мөнгөн хомсдол, буруу хөрөнгө оруулалтаар төгсдөг; хамтрагч, хөрөнгө оруулагч төлөвлөгөө шаарддаг), үнийн харьцуулалт (мэргэжилтэнд бичүүлэх эсвэл өөрөө олон долоо хоног зарцуулахтай харьцуул). Ашиг заавал өснө гэж баталгаа өгөхгүй. Хуурамч хөнгөлөлт, «өнөөдөр л» гэх дарамт, зохиомол сэтгэгдэл хэрэглэхгүй. Ятгасны дараа нэг тодорхой алхмаар төгсгө. Сонирхохгүй гэвэл шахахгүй.
+- Хангалттай мэдээлэл (1, 2, 3, 8 заавал; бусад нь боломжтой бол) цугларсан эсвэл захиалагч «болсон, эхлүүл» гэвэл ready=true; reply-д цуглуулсан гол мэдээллийг 3–6 мөрөөр товч давтаж бич (үнэ, төлбөрийн мэдээллийг бичихгүй).
+Зөвхөн JSON: {"reply":"захиалагчид илгээх текст","ready":false,"blocked":false}`;
+const BP_HELLO = () => `📘 Бизнес төлөвлөгөө — ${fmtMoney(BP_PRICE)}\n\nБизнесээ удирдах, өсгөх 3 жилийн төлөвлөгөө (50–70 хуудас): зах зээл, өрсөлдөгчийн судалгаа, стратеги, зорилт, үйл ажиллагааны хуваарь, санхүүгийн төсөөлөл, гол үзүүлэлтийн хяналт (PDF, Word, Excel).\n\n💡 Банк, сангаас зээл авах бол «Бизнес төсөл»-ийг сонгоно уу.\n\nДоорх мэдээллийг НЭГ мессежид бүгдийг нь багтааж бичнэ үү:\n1. Бизнесийн нэр, юу хийдэг, хаана\n2. Шинэ эсвэл ажиллаж байгаа (ажиллаж байгаа бол сарын борлуулалт)\n3. Бүтээгдэхүүн/үйлчилгээ, үнэ, өртөг\n4. Ажилтан, сарын гол зардал\n5. 3 жилийн гол зорилго, хөрөнгө оруулалтын төлөвлөгөө\n\nМэдэхгүй зүйлээ «мэдэхгүй» гэж бичиж болно.`;
+
+async function interview(f, text, system = INTERVIEW) {
   f.conv = f.conv || [];
   f.conv.push({ role: "Захиалагч", text: String(text || "").slice(0, 3000) });
   const convText = f.conv.map((m) => `${m.role}: ${m.text}`).join("\n");
   let out;
-  try { out = await callJSON({ system: INTERVIEW, user: `ЯРИА:\n${convText}\n\nДараагийн хариугаа JSON-оор бич.${f.conv.filter((m) => m.role === "Захиалагч").length >= 12 ? " Асуулт хангалттай олон боллоо — ready=true болго." : ""}`, model: process.env.FLOW_MODEL || WRITER, maxTokens: 1500 }); }
+  try { out = await callJSON({ system, user: `ЯРИА:\n${convText}\n\nДараагийн хариугаа JSON-оор бич.${f.conv.filter((m) => m.role === "Захиалагч").length >= 12 ? " Асуулт хангалттай олон боллоо — ready=true болго." : ""}`, model: process.env.FLOW_MODEL || WRITER, maxTokens: 1500 }); }
   catch (e) { console.warn("[flow] interview:", e.message); out = { reply: "Уучлаарай, түр саатал гарлаа. Хариугаа дахин бичнэ үү.", ready: false }; }
   const reply = String(out.reply || "").trim() || "Ойлголоо. Үргэлжлүүлээд бичнэ үү.";
   f.conv.push({ role: "Менежер AI", text: reply });
@@ -213,6 +236,7 @@ const ABOUT = {
   plan: "Өмнөх үеийн материал дээр үндэслэн дараагийн хугацааны ажлын/үйл ажиллагааны төлөвлөгөө (Word, PDF; байгууллагын төлөвлөгөөнд томьёотой Excel төсөв) бэлтгэнэ; зорилт, арга хэмжээ, хариуцагч, хугацаа, хэмжих үзүүлэлттэй. Тоо зохиохгүй, дутуу мэдээллийг жагсаана.",
 };
 function aboutFor(product) {
+  if (product === "bplan") return "Бизнесээ удирдах, өсгөх 3 жилийн төлөвлөгөө (50–70 хуудас): зах зээл, өрсөлдөгчийн судалгаа, бизнесийн загвар, стратеги, 3 жилийн зорилт, маркетинг, борлуулалт, баг, үйл ажиллагааны хуваарь, өсөлтийн төлөвлөгөө, санхүүгийн төсөөлөл (орлого, ашиг, мөнгөн гүйлгээ), эрсдэл, гол үзүүлэлтийн хяналт. PDF + Word + томьёотой Excel, 1 удаа үнэгүй засвар. Банкны зээлд «Бизнес төсөл» тохирно.";
   if (product === "marketing") return ABOUT.marketing;
   if (product === "report_custom") return ABOUT.report + " Захиалагчийн илгээсэн удирдамжийн (заавар, загвар) дагуу бүтэц гаргана — төслийн, сургалтын, арга хэмжээний, дадлагын гэх мэт ямар ч ажлын тайлан. Дипломын ажил, курсын ажил бичихгүй. Сургууль, дадлагын тайлан бол бид материалыг цэгцэлсэн ноорог бэлтгэнэ, оюутан өөрийн үгээр засаж хянаад өгөх ёстой, сургуулийн дүрмийг мөрдөх хариуцлага захиалагчид — үүнийг заавал хэл.";
   if (product === "plan_custom") return ABOUT.plan + " Захиалагчийн илгээсэн удирдамжийн (заавар, загвар) дагуу бүтэц гаргана — төслийн хэрэгжүүлэх, арга хэмжээний, сургалтын, үйл ажиллагааны гэх мэт ямар ч төлөвлөгөө, удирдамж, хөтөлбөр. Хариуцагч, төсөв, огноог зохиохгүй, материалд байхгүй бол нөхөх газрыг тэмдэглэнэ. Дипломын ажил, курсын ажил бичихгүй. Сургуулийн төлөвлөгөө бол ноорог бэлтгэнэ, өөрийн үгээр засаж хянаад өгөх ёстой, сургуулийн дүрмийг мөрдөх хариуцлага захиалагчид — үүнийг заавал хэл.";
@@ -230,7 +254,7 @@ const PERSUADE = `Чи «Менежер AI»-ийн Facebook Messenger дээр�
 async function persuade(f, text) {
   f.salesN = (f.salesN || 0) + 1;
   f.salesLog = (f.salesLog || []).concat([`Захиалагч: ${String(text).slice(0, 500)}`]).slice(-8);
-  const price = f.price ? fmtMoney(f.price) : (f.product === "marketing" ? `${fmtMoney(MKT_PRICE)} (бизнес төсөлтэй багцаар 249 900₮)` : (PRODUCTS[f.product] ? tiers(f.product) : ""));
+  const price = f.price ? fmtMoney(f.price) : (f.product === "bplan" ? fmtMoney(BP_PRICE) : f.product === "marketing" ? `${fmtMoney(MKT_PRICE)} (бизнес төсөлтэй багцаар 249 900₮)` : (PRODUCTS[f.product] ? tiers(f.product) : ""));
   const stage = f.s === "awaiting_payment" ? "төлбөр хүлээж байна" : "материал илгээхийг хүлээж байна";
   try {
     const out = await callJSON({ system: PERSUADE, user: `ҮЙЛЧИЛГЭЭ: ${NAMES[f.product] || f.product}\nҮНЭ: ${price}\nЮУ АВАХ: ${aboutFor(f.product)}\nШАТ: ${stage}\n\nӨМНӨХ ЯРИА:\n${f.salesLog.join("\n")}\n\nДараагийн хариугаа JSON-оор бич.`, model: process.env.FLOW_MODEL || WRITER, maxTokens: 1500 });
@@ -297,7 +321,7 @@ async function qpCheck(psid, f) {
 }
 
 async function askPayment(psid, f) {
-  f.s = "awaiting_payment"; f.price = f.product === "marketing" ? MKT_PRICE : f.price;
+  f.s = "awaiting_payment"; f.price = f.product === "marketing" ? MKT_PRICE : f.product === "bplan" ? BP_PRICE : f.price;
   const pi = payInfo();
   if (await offerQpay(psid, f, NAMES[f.product] || "Менежер AI")) return;
   await send(psid, `💳 Төлбөр: ${fmtMoney(f.price)}\n\n${pi ? pi + "\n\n" : ""}Гүйлгээний утга дээр утасны дугаараа бичнэ үү. Төлбөр шилжүүлсний дараа гүйлгээний баримтын зургийг (screenshot) энд илгээнэ үү.${pi ? "" : "\n\nДансны мэдээллийг манай ажилтан удахгүй илгээнэ."}`, [["Цуцлах", "FLOW_CANCEL"]]);
@@ -306,6 +330,13 @@ async function askPayment(psid, f) {
 
 async function startJob(psid, f) {
   const base = `http://127.0.0.1:${process.env.PORT || 3000}`, headers = { "Content-Type": "application/json", "x-api-key": process.env.API_KEY || "" };
+  if (f.product === "bplan") {
+    const conv = "ЭНЭ БОЛ БИЗНЕС ТӨЛӨВЛӨГӨӨ (банкны зээлийн төсөл биш): захиалагч зээл хүсээгүй бол loan.amount = 0, хөрөнгө оруулалтыг өөрийн хөрөнгө (cash_equity), ашгаар санхүүжүүлнэ; ажиллаж буй бизнес бол одоогийн борлуулалтыг суурь болго; project.funder хоосон.\n\n" + (f.conv || []).map((m) => `${m.role}: ${m.text}`).join("\n");
+    const r = await fetch(base + "/jobs/plan", { method: "POST", headers, body: JSON.stringify({ psid, mode: "bplan", conversation: conv }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.job_id) throw new Error(j.error || `HTTP ${r.status}`);
+    Object.assign(f, { s: "processing", job: j.job_id, jobKind: "plan", startedAt: Date.now() }); return;
+  }
   const mkt = f.product === "marketing";
   const body = mkt ? { psid, conversation: (f.conv || []).map((m) => `${m.role}: ${m.text}`).join("\n") } : { psid, product: f.product, period: PER.clean(f.period) || undefined, periodYear: f.periodYear || undefined, conversation: (f.conv || []).map((m) => `${m.role}: ${m.text}`).join("\n") };
   const r = await fetch(base + (mkt ? "/mkt/jobs" : "/org/jobs"), { method: "POST", headers, body: JSON.stringify(body) });
@@ -315,7 +346,7 @@ async function startJob(psid, f) {
 }
 async function jobStatus(f) {
   if (!f.job) return null;
-  try { const r = await fetch(`http://127.0.0.1:${process.env.PORT || 3000}/${f.jobKind}/jobs/${f.job}`, { headers: { "x-api-key": process.env.API_KEY || "" } }); if (r.status === 404) return "gone"; return (await r.json()).status; } catch (_) { return null; }
+  try { const r = await fetch(`http://127.0.0.1:${process.env.PORT || 3000}/${f.jobKind === "plan" ? "" : f.jobKind + "/"}jobs/${f.job}`, { headers: { "x-api-key": process.env.API_KEY || "" } }); if (r.status === 404) return "gone"; return (await r.json()).status; } catch (_) { return null; }
 }
 
 // ---- Гол логик ----
@@ -331,7 +362,13 @@ async function handle({ psid, text, payload, attachments }) {
 
   // Үндсэн цэсний сонголтууд (аль ч төлөвөөс, боловсруулж байгаагаас бусад)
   if (payload === "BIZ_PROJECT") { if (f.s === "processing") return "ext"; await setF(psid, { s: "left" }); await send(psid, "Бизнес төсөл сонголоо. Үргэлжлүүлэхийн тулд доорх товчийг дахин дарна уу.", [["Бизнес төсөл", "BIZ_PROJECT"]]); return "selecting_type"; }
-  if ((["MKT_PLAN", "ORG_PLAN", "ORG_REPORT"].includes(payload) || payload === "FLOW_G_dept" || payload === "FLOW_G_org") && f.s !== "processing" && f.s !== "payment_review") {
+  if ((["BIZ_PLAN", "MKT_PLAN", "ORG_PLAN", "ORG_REPORT"].includes(payload) || payload === "FLOW_G_dept" || payload === "FLOW_G_org") && f.s !== "processing" && f.s !== "payment_review") {
+    if (payload === "BIZ_PLAN") {
+      f = { s: "bp_interview", product: "bplan", conv: [] };
+      const hello = BP_HELLO();
+      f.conv.push({ role: "Менежер AI", text: hello });
+      await setF(psid, f); await send(psid, hello, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
+    }
     if (payload === "MKT_PLAN") {
       f = { s: "mkt_interview", product: "marketing", conv: [] };
       const hello = `📣 Маркетингийн төлөвлөгөө — ${fmtMoney(MKT_PRICE)}\n\n40–75 хуудас, алхам алхмаар хэрэгжүүлэх хөтөч: зах зээл, өрсөлдөгчийн шинжилгээ, маркетингийн стратеги, зарын бэлэн текст, 30 хоногийн контент календарь, сар бүрийн төсөв, үр дүнгийн тооцоо (PDF, Word, Excel).\n\nДоорх мэдээллийг НЭГ мессежид бүгдийг нь багтааж бичнэ үү:\n1. Юуг сурталчлах вэ (бүтээгдэхүүн/үйлчилгээ, байгууллага эсвэл өөрийгөө), нэр\n2. Юу санал болгодог, үнэ\n3. Хэнд зарах вэ (зорилтот хэрэглэгч)\n4. Сард маркетингт зарцуулах төсөв\n5. Хэзээнээс эхлэх, гол зорилго\n\nМэдэхгүй зүйлээ «мэдэхгүй» гэж бичиж болно. Олон жижиг мессеж болгон тасалбал зарим мэдээлэл орохгүй үлдэх эрсдэлтэй.`;
@@ -349,6 +386,14 @@ async function handle({ psid, text, payload, attachments }) {
   if (payload.startsWith("FLOW_N_") && f.s === "choose" && f.product && f.ptype) return pickN(psid, f, Number(payload.slice(7)));
 
   switch (f.s) {
+    case "bp_interview": {
+      if (atts.length && !text) { await send(psid, "Зураг, файлыг энэ шатанд уншихгүй. Мэдээллээ текстээр бичнэ үү 🙏"); return "ext"; }
+      if (!text) return "ext";
+      const r = await interview(f, text, BP_INTERVIEW);
+      if (r.blocked) { await setF(psid, { s: "left" }); await send(psid, r.reply); return "selecting_type"; }
+      if (r.ready) { await send(psid, r.reply); await askPayment(psid, f); await setF(psid, f); return "ext"; }
+      await setF(psid, f); await send(psid, r.reply, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
+    }
     case "mkt_interview": {
       if (atts.length && !text) { await send(psid, "Зураг, файлыг энэ шатанд уншихгүй. Мэдээллээ текстээр бичнэ үү 🙏"); return "ext"; }
       if (!text) return "ext";
