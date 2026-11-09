@@ -129,17 +129,19 @@ function explain(fund, topic) {
 const OFFER_MSG = "📄 Бүтэн бизнес төсөл — 149,900₮\n• 50–75 хуудас, PDF + Word + томьёотой Excel\n• Таны өгсөн мэдээллээр, ихэвчлэн 30–90 минутад бэлэн болно\n• 1 удаагийн засвар багтсан\n\nЗахиалах бол доорх товчийг дарна уу.";
 // Жишээ хуудсууд: org-v1/samples/sample-1..3.jpg (/guide-samples/N.jpg-ээр нээлттэй). SAMPLE_IMAGES=url,url — өөр зураг; SAMPLE_IMAGES=off — унтраах.
 const BASE_URL = () => String(process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "https://menejer-ai-plan-service.onrender.com").replace(/\/$/, "");
-const sampleUrls = () => {
+const sampleUrls = (kind) => {
   const v = String(process.env.SAMPLE_IMAGES || "").trim();
   if (v === "off") return [];
+  if (kind === "report") return [1, 2, 3].map((n) => `${BASE_URL()}/guide-samples/r${n}.jpg?v=1`);
   if (v) return v.split(",").map((x) => x.trim()).filter(Boolean);
   return [1, 2, 3].map((n) => `${BASE_URL()}/guide-samples/${n}.jpg?v=2`);
 };
+const REPORT_CAP = "📄 Дээрх нь Менежер AI-ийн бэлтгэсэн тайлангийн жишээ хуудсууд (байгууллага, нэр, тоог далдалсан). Таны өгсөн Excel, баримт, тэмдэглэлээс ийм хүснэгт, графиктай тайлан гарна.";
 const SAMPLE_CAP = "📄 Дээрх нь Менежер AI-ийн бэлтгэсэн бизнес төслийн жишээ хуудсууд (тоо, нууц мэдээллийг далдалсан). Таны төсөл ч ийм бүтэц, хүснэгт, графиктай, 50–75 хуудсаар PDF + Word + Excel-ээр гарна.";
-async function sendSamples(psid) {
-  const urls = sampleUrls(); if (!urls.length) return false;
+async function sendSamples(psid, kind) {
+  const urls = sampleUrls(kind); if (!urls.length) return false;
   for (const u of urls.slice(0, 5)) await F()._sendImage(psid, u);
-  await F()._send(psid, SAMPLE_CAP);
+  await F()._send(psid, kind === "report" ? REPORT_CAP : SAMPLE_CAP);
   return true;
 }
 async function notifyHot(psid, text, L) {
@@ -163,7 +165,7 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
 
   // QR илгээсний дараа ч жишээ зураг асуувал илгээнэ
   if (!payload && text && RX.sample.test(text) && ["", "selecting_type", "awaiting_payment"].includes(state) && text.length < 80) {
-    if (await sendSamples(psid)) { await setL(psid, L); return out(true); }
+    if (await sendSamples(psid, /тайлан/i.test(text) ? "report" : "")) { await setL(psid, L); return out(true); }
   }
   if (!fresh) return out(false);
 
@@ -225,8 +227,8 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
 }
 
 router.get("/guide-samples/:n.jpg", (req, res) => {
-  const n = Number(req.params.n); if (![1, 2, 3].includes(n)) return res.status(404).end();
-  res.set("Cache-Control", "public, max-age=86400").sendFile(require("path").join(__dirname, "samples", `sample-${n}.jpg`));
+  const m = String(req.params.n).match(/^(r?)([123])$/); if (!m) return res.status(404).end();
+  res.set("Cache-Control", "public, max-age=86400").sendFile(require("path").join(__dirname, "samples", `${m[1] ? "report" : "sample"}-${m[2]}.jpg`));
 });
 router.post("/lead/classify", express.json(), auth, async (req, res) => {
   try { res.json(await handle(req.body || {})); }
