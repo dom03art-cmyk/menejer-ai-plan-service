@@ -127,11 +127,19 @@ function explain(fund, topic) {
   return `Өөрийн мөнгөөр эхлэхэд хамгийн том эрсдэл бол хэдэн төгрөг хэрэгтэй, хэзээ өртгөө нөхөхийг мэдэлгүй зарцуулах явдал. Бүтэн төсөл ${b} эхлэлийн зардал, үнэ, сар бүрийн ашиг, хөрөнгө нөхөгдөх хугацааг тооцож, мөнгөө хаана, хэдийг зарцуулахаа төлөвлөхөд тусална.`;
 }
 const OFFER_MSG = "📄 Бүтэн бизнес төсөл — 149,900₮\n• 50–75 хуудас, PDF + Word + томьёотой Excel\n• Таны өгсөн мэдээллээр, ихэвчлэн 30–90 минутад бэлэн болно\n• 1 удаагийн засвар багтсан\n\nЗахиалах бол доорх товчийг дарна уу.";
-const sampleUrls = () => String(process.env.SAMPLE_IMAGES || "").split(",").map((x) => x.trim()).filter(Boolean);
-async function sendSamples(psid, quiet) {
+// Жишээ хуудсууд: org-v1/samples/sample-1..3.jpg (/guide-samples/N.jpg-ээр нээлттэй). SAMPLE_IMAGES=url,url — өөр зураг; SAMPLE_IMAGES=off — унтраах.
+const BASE_URL = () => String(process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || "https://menejer-ai-plan-service.onrender.com").replace(/\/$/, "");
+const sampleUrls = () => {
+  const v = String(process.env.SAMPLE_IMAGES || "").trim();
+  if (v === "off") return [];
+  if (v) return v.split(",").map((x) => x.trim()).filter(Boolean);
+  return [1, 2, 3].map((n) => `${BASE_URL()}/guide-samples/${n}.jpg`);
+};
+const SAMPLE_CAP = "📄 Дээрх нь Менежер AI-ийн бэлтгэсэн бодит баримтын жишээ хуудсууд (маркетингийн төлөвлөгөөнөөс, тоо, нууц мэдээллийг далдалсан). Бизнес төсөл ч мөн ийм хүснэгт, графиктай, 50–75 хуудсаар гарна.";
+async function sendSamples(psid) {
   const urls = sampleUrls(); if (!urls.length) return false;
   for (const u of urls.slice(0, 5)) await F()._sendImage(psid, u);
-  if (!quiet) await F()._send(psid, "📄 Дээрх нь бэлэн бизнес төслийн жишээ хуудсууд. Бүтэн төсөл 50–75 хуудас, PDF + Word + томьёотой Excel-ээр ирнэ.");
+  await F()._send(psid, SAMPLE_CAP);
   return true;
 }
 async function notifyHot(psid, text, L) {
@@ -164,7 +172,7 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
     const fund = fundOf(payload, text);
     if (fund !== "other") await count("fund_" + fund, psid);
     L.stage = "offered"; L.fund = fund; L.tag = "intent"; await setL(psid, L);
-    await sendSamples(psid, true);
+    await sendSamples(psid).catch((e) => console.warn("[lead] samples:", e.message));
     await F()._send(psid, explain(fund, L.topic));
     await F()._send(psid, OFFER_MSG, ORDER_BTN);
     await count("offer", psid);
@@ -216,12 +224,16 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
   await setL(psid, L); await F()._send(psid, ASK_MSG, SVC_BTN); return out(true);
 }
 
+router.get("/guide-samples/:n.jpg", (req, res) => {
+  const n = Number(req.params.n); if (![1, 2, 3].includes(n)) return res.status(404).end();
+  res.set("Cache-Control", "public, max-age=86400").sendFile(require("path").join(__dirname, "samples", `sample-${n}.jpg`));
+});
 router.post("/lead/classify", express.json(), auth, async (req, res) => {
   try { res.json(await handle(req.body || {})); }
   catch (e) { console.warn("[lead]", e.message); res.json({ sales: "", handled: "0", tag: "" }); }
 });
 module.exports = router;
-module.exports.handle = handle;
+module.exports.handleLead = handle; // «handle» нэр нь express router-ийн дотоод функцтэй давхцдаг тул өөр нэр
 module.exports.count = count;
 module.exports.classify = classify;
 module.exports.reportText = reportText;
