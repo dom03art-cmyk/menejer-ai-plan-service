@@ -2,6 +2,9 @@
 //   үйлчилгээ → «ятгах» тэмдэг (sales=1) буцаана, хариуг Make-ийн итгүүлэх бот (Opus) өгнө;
 //   мэдээлэл, машин асуусан → товч мэдээлэл өгөөд орхино (handled=1);
 //   тодорхойгүй ("Hi", "Үнийн мэдээлэл") → «Төсөл бичүүлэх / Зүгээр мэдээлэл» гэсэн 2 товчтой асуулт (handled=1).
+//   сэдэв тодорхой (рийлийн түлхүүр үг «ЯС», эсвэл «лазер машин хэд вэ») → «{сэдэв} бизнес сонирхож байна уу? Өөрийн хөрөнгөөр үү, зээлээр үү?»
+//   → хариулбал жишээ хуудсууд + бүтэн төсөл юу шийдэхийг 2 өгүүлбэрээр + «✅ Төсөл захиалах» товч. QR зөвхөн захиалах дарсны дараа (Make).
+//   Үнэгүй тооцоо амлахгүй.
 // Make: POST /lead/classify {psid, text, payload, state, sales_ref, att} → {sales:"1"|"0"|"", handled:"1"|"0", tag}
 // LEAD_ENABLED=1 эсвэл LEAD_TEST_PSIDS-д байгаа хүнд л ажиллана; бусдад хоосон хариу буцааж, хуучин урсгал хэвээр үлдэнэ.
 // Үе шат бүрийг долоо хоногоор тоолно (админ Messenger-т «статистик» гэж бичвэл тайлан ирнэ).
@@ -45,10 +48,33 @@ async function stats(weeks = 4) {
   return out;
 }
 const STAGES = [["new", "Эхний мессеж"], ["cat_intent", "Үйлчилгээ хүссэн (ятгах)"], ["cat_info", "Мэдээлэл хүссэн"], ["cat_machine", "Машин, бараа асуусан"], ["cat_unclear", "Тодорхойгүй (асуулт тавьсан)"],
+  ["kw", "Рийлийн түлхүүр үг бичсэн"], ["topic_q", "Сэдвээр санхүүжилт асуусан"], ["fund_own", "→ Өөрийн хөрөнгөөр"], ["fund_loan", "→ Зээлээр"], ["fund_research", "→ Судалж байна"], ["offer", "Жишээ + санал илгээсэн"],
   ["btn_svc", "«Төсөл бичүүлэх» дарсан"], ["btn_info", "«Зүгээр мэдээлэл» дарсан"], ["hot", "Халуун (тодорхой төсөл)"], ["qr", "QR илгээсэн"], ["paid", "Төлсөн"]];
 async function reportText() {
   const rows = await stats(4);
   return "📊 Борлуулалтын юүлүүр (долоо хоногоор, хүний тоо)\n\n" + rows.map(([wk, s]) => `${wk}\n${STAGES.map(([k, n]) => `• ${n}: ${s[k] || 0}`).join("\n")}`).join("\n\n");
+}
+
+// ---- рийлийн түлхүүр үг (админ Messenger-ээс засна) ----
+// «түлхүүр ЯС = Ясны шөлний нунтгийн» — нэмэх/солих (сэдвийг харьяалахаар: «...-ийн/-ны»)
+// «түлхүүрүүд» — жагсаалт; «түлхүүр устга ЯС» — устгах
+const memKw = new Map();
+const normKw = (x) => String(x || "").toUpperCase().replace(/[^0-9A-ZА-ЯЁӨҮ\s]/g, " ").replace(/\s+/g, " ").trim();
+async function kwAll() { const c = await F()._client(); return c ? await c.hGetAll("lead:kw") : Object.fromEntries(memKw); }
+async function kwSet(k, v) { const c = await F()._client(); if (c) await c.hSet("lead:kw", k, v); else memKw.set(k, v); }
+async function kwDel(k) { const c = await F()._client(); if (c) return await c.hDel("lead:kw", k); return memKw.delete(k) ? 1 : 0; }
+async function kwMatch(text) {
+  const n = normKw(text); if (!n || n.length > 60) return "";
+  const all = await kwAll(); if (all[n]) return all[n];
+  const first = n.split(" ")[0]; return n.split(" ").length <= 4 && all[first] ? all[first] : "";
+}
+async function kwAdmin(text) {
+  let m = text.match(/^түлхүүр\s+устга\s+(.+)$/i);
+  if (m) { const k = normKw(m[1]); return (await kwDel(k)) ? `🗑 «${k}» устгалаа.` : `«${k}» олдсонгүй.`; }
+  m = text.match(/^түлхүүр\s+(.+?)\s*=\s*(.+)$/i);
+  if (m) { const k = normKw(m[1]), v = m[2].trim().replace(/\s*бизнес$/i, ""); if (!k) return "Түлхүүр хоосон байна."; await kwSet(k, v); return `✅ «${k}» → «${v} бизнес сонирхож байна уу? …» гэж эхэлнэ.`; }
+  if (/^түлхүүрүүд$/i.test(text)) { const a = Object.entries(await kwAll()); return a.length ? "🔑 Түлхүүр үгс:\n" + a.map(([k, v]) => `• ${k} = ${v}`).join("\n") : "Түлхүүр үг алга. Нэмэх: «түлхүүр ЯС = Ясны шөлний нунтгийн»"; }
+  return null;
 }
 
 // ---- ангилал ----
@@ -65,33 +91,47 @@ const CLS = `Чи «Менежер AI» Facebook пэйжийн чатын ан�
 - "machine": бичлэгт гарсан машин, тоног төхөөрөмж, барааны үнэ, хаанаас авах, зарах эсэхийг асууж байна.
 - "info": бизнесийн санаа, салбарын талаар ерөнхий мэдээлэл асууж байна (үйлчилгээ захиалах дохиогүй).
 - "unclear": мэндчилгээ, нэг үг, тодорхойгүй.
+topic: мессежид тодорхой бизнес, бүтээгдэхүүн, машин нэрлэсэн бол тэр бизнесийн нэрийг ХАРЬЯАЛАХ тийн ялгалаар, том үсгээр эхэлж бич (жишээ: «Ясны шөлний нунтгийн», «Лазер зүсэлтийн», «Хадаасны үйлдвэрлэлийн», «Кофе шопын»). «бизнес» гэдэг үгийг бүү нэм. Тодорхой сэдэвгүй бол "".
 hot=true: зөвхөн intent бөгөөд тодорхой бизнес, төсөл нэрлэсэн бол (жишээ нь «хадаасны цехийн төсөл хэрэгтэй»).
 info бол reply-д асуултад нь 1–2 өгүүлбэрээр ерөнхий, үнэн мэдээлэл өг (тоо, үнэ зохиохгүй, машин зардаггүй), төгсгөлд «Энэ бизнесийг эхлүүлэх төсөл, тооцоо хэрэгтэй бол доорх товчийг дарна уу» гэж нэм. Бусад ангилалд reply хоосон.
-Монгол, кирилл, «Та» гэж. Зөвхөн JSON: {"cat":"intent|machine|info|unclear","hot":false,"reply":""}`;
+Монгол, кирилл, «Та» гэж. Зөвхөн JSON: {"cat":"intent|machine|info|unclear","hot":false,"topic":"","reply":""}`;
+const cleanTopic = (x) => String(x || "").replace(/["«»]/g, "").replace(/\s*бизнес(ийн)?\s*$/i, "").trim().slice(0, 60);
 async function classify(text) {
   const t = String(text || "").trim();
   if (!t) return { cat: "unclear" };
   if (RX.chit.test(t)) return { cat: "unclear" };
   const hot = /(төсөл|төлөвлөгөө).{0,25}(хэрэгтэй|бичүүл|хийлгэ|хий)|(хэрэгтэй|бичүүл|хийлгэ).{0,25}(төсөл|төлөвлөгөө)/i.test(t) && t.length > 12;
-  if (RX.strong.test(t)) return { cat: "intent", hot };
-  if (RX.machine.test(t)) return { cat: "machine" };
-  if (RX.intent.test(t)) return { cat: "intent", hot };
+  const rx = RX.strong.test(t) ? "intent" : RX.machine.test(t) ? "machine" : RX.intent.test(t) ? "intent" : "";
   try {
     const o = await callJSON({ system: CLS, user: `Мессеж: ${t.slice(0, 800)}`, model: process.env.LEAD_MODEL || FAST, maxTokens: 400 });
-    const cat = ["intent", "machine", "info", "unclear"].includes(o.cat) ? o.cat : "unclear";
-    return { cat, hot: cat === "intent" && !!o.hot, reply: String(o.reply || "").slice(0, 600) };
-  } catch (e) { console.warn("[lead] classify:", e.message); return RX.machine.test(t) ? { cat: "machine" } : RX.intent.test(t) ? { cat: "intent" } : { cat: "unclear" }; }
+    const cat = rx || (["intent", "machine", "info", "unclear"].includes(o.cat) ? o.cat : "unclear");
+    return { cat, hot: cat === "intent" && (hot || !!o.hot), topic: cleanTopic(o.topic), reply: String(o.reply || "").slice(0, 600) };
+  } catch (e) { console.warn("[lead] classify:", e.message); return rx ? { cat: rx, hot: rx === "intent" && hot } : { cat: "unclear" }; }
 }
 
 const SVC_BTN = [["📄 Төсөл бичүүлэх", "LEAD_SVC"], ["💡 Зүгээр мэдээлэл", "LEAD_INFO"]];
 const MACHINE_MSG = "Сайн байна уу! Бид бизнес санааны бичлэгүүдээ хөдөлмөр эрхлэлтийг дэмжих зорилгоор хуваалцдаг бөгөөд бичлэгт гарсан машин, тоног төхөөрөмж зардаггүй 🙏\n\nХарин энэ бизнесийг эхлүүлэх бол хөрөнгө оруулалт, зардал, ашгийг тооцсон бизнес төслийг бэлтгэж өгдөг. Хэрэгтэй бол доорх товчийг дарна уу.";
 const INFO_MSG = "Менежер AI бол бизнес төсөл, бизнес төлөвлөгөө, маркетингийн төлөвлөгөө, тайлан бэлтгэдэг үйлчилгээ. Бизнес санааны бичлэгүүдээ хөдөлмөр эрхлэлтийг дэмжих зорилгоор хуваалцдаг, машин, тоног төхөөрөмж зардаггүй.\n\nТөсөл, төлөвлөгөө хэрэгтэй болвол хэзээ ч бичээрэй 🙂";
 const ASK_MSG = "Сайн байна уу! 👋 Менежер AI — бизнес төсөл, төлөвлөгөө, тайлан бэлтгэдэг үйлчилгээ.\n\nТанд юу хэрэгтэй вэ?";
+const FUND_BTN = [["💰 Өөрийн хөрөнгөөр", "LEAD_F_OWN"], ["🏦 Зээл авна", "LEAD_F_LOAN"], ["🔎 Судалж байна", "LEAD_F_RESEARCH"]];
+const ORDER_BTN = [["✅ Төсөл захиалах", "BIZ_ORDER"], ["❓ Асуулт байна", "LEAD_Q"]];
+const topicQ = (topic, machine) => (machine ? "Сайн байна уу! Бид бичлэгт гарсан машин, тоног төхөөрөмж зардаггүй 🙏 Харин энэ бизнесийг эхлүүлэх төслийг бэлтгэж өгдөг.\n\n" : "Сайн байна уу! ")
+  + `${topic} бизнес сонирхож байна уу? 🙂 Та үүнийг өөрийн хөрөнгөөр эхлүүлэх үү, зээл авах уу?`;
+const fundOf = (payload, text) => payload === "LEAD_F_LOAN" ? "loan" : payload === "LEAD_F_OWN" ? "own" : payload === "LEAD_F_RESEARCH" ? "research"
+  : /(зээл|банк|санхүүжилт|хөрөнгө\s*оруулагч)/i.test(text) ? "loan" : /(өөрийн|өөрөө|хадгаламж|бэлэн\s*мөнгө|хөрөнгөөр)/i.test(text) ? "own" : /(судал|мэдэх|сонирх|бодож|харж)/i.test(text) ? "research" : "other";
+function explain(fund, topic) {
+  const b = topic ? `${topic} бизнесийн` : "энэ бизнесийн";
+  if (fund === "loan") return `Банк зээл олгохдоо хөрөнгө оруулалт, борлуулалт, ашиг, зээлийн эргэн төлөлт бодитой тооцоологдсон эсэхийг төслөөс нь шалгадаг. Бүтэн төсөл ${b} зах зээл, зардал, ашиг, сар бүрийн мөнгөн урсгал, зээлийн эргэн төлөлтийн хуваарийг банкны бүтэцтэйгээр гаргаж өгнө.`;
+  if (fund === "research") return `Судалж байх үед хамгийн чухал нь энэ бизнес ашигтай эсэх, хэдий хэмжээний хөрөнгө шаардахыг мөнгө зарахаас өмнө мэдэх. Бүтэн төсөл ${b} зах зээл, өрсөлдөгч, зардал, ашгийг тооцож, эхлэх эсэхээ тоо баримтаар шийдэхэд тусална.`;
+  if (fund === "other") return `Бизнес эхлүүлэхэд хамгийн том эрсдэл бол хэдэн төгрөг хэрэгтэй, хэзээ ашигтай ажиллахыг мэдэлгүй эхлэх явдал. Бүтэн төсөл ${b} зах зээл, эхлэлийн зардал, сар бүрийн ашиг, хөрөнгө нөхөгдөх хугацааг тооцож, өөрийн хөрөнгөөр ч, зээлээр ч эхлэхэд тань тоон үндэслэл болно.`;
+  return `Өөрийн мөнгөөр эхлэхэд хамгийн том эрсдэл бол хэдэн төгрөг хэрэгтэй, хэзээ өртгөө нөхөхийг мэдэлгүй зарцуулах явдал. Бүтэн төсөл ${b} эхлэлийн зардал, үнэ, сар бүрийн ашиг, хөрөнгө нөхөгдөх хугацааг тооцож, мөнгөө хаана, хэдийг зарцуулахаа төлөвлөхөд тусална.`;
+}
+const OFFER_MSG = "📄 Бүтэн бизнес төсөл — 149,900₮\n• 50–75 хуудас, PDF + Word + томьёотой Excel\n• Таны өгсөн мэдээллээр, ихэвчлэн 30–90 минутад бэлэн болно\n• 1 удаагийн засвар багтсан\n\nЗахиалах бол доорх товчийг дарна уу.";
 const sampleUrls = () => String(process.env.SAMPLE_IMAGES || "").split(",").map((x) => x.trim()).filter(Boolean);
-async function sendSamples(psid) {
+async function sendSamples(psid, quiet) {
   const urls = sampleUrls(); if (!urls.length) return false;
   for (const u of urls.slice(0, 5)) await F()._sendImage(psid, u);
-  await F()._send(psid, "📄 Дээрх нь бэлэн бизнес төслийн жишээ хуудсууд (нууц мэдээлэлгүй). Бүтэн төсөл 50–75 хуудас, PDF + Word + томьёотой Excel-ээр ирнэ.");
+  if (!quiet) await F()._send(psid, "📄 Дээрх нь бэлэн бизнес төслийн жишээ хуудсууд. Бүтэн төсөл 50–75 хуудас, PDF + Word + томьёотой Excel-ээр ирнэ.");
   return true;
 }
 async function notifyHot(psid, text, L) {
@@ -106,6 +146,7 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
   const base = { sales: "", handled: "0", tag: "" };
   if (!psid || !enabled(psid)) return base;
   if (psid === ADMIN() && /^(статистик|воронк|юүлүүр)$/i.test(text)) { await F()._send(psid, await reportText()); return { ...base, handled: "1" }; }
+  if (psid === ADMIN() && /^түлхүүр/i.test(text)) { const r = await kwAdmin(text); if (r) { await F()._send(psid, r); return { ...base, handled: "1" }; } }
   const L = await getL(psid);
   const yat = String(sales_ref || "") === "yatgah";
   const out = (handled) => ({ sales: L.tag === "intent" || yat ? "1" : "0", handled: handled ? "1" : "0", tag: L.tag || "" });
@@ -118,6 +159,22 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
   }
   if (!fresh) return out(false);
 
+  // 4-р алхам: санхүүжилтийн хариу → жишээ хуудсууд + 2 өгүүлбэр + захиалах товч
+  if (L.stage === "asked_funding" && (/^LEAD_F_/.test(payload) || (!payload && text))) {
+    const fund = fundOf(payload, text);
+    if (fund !== "other") await count("fund_" + fund, psid);
+    L.stage = "offered"; L.fund = fund; L.tag = "intent"; await setL(psid, L);
+    await sendSamples(psid, true);
+    await F()._send(psid, explain(fund, L.topic));
+    await F()._send(psid, OFFER_MSG, ORDER_BTN);
+    await count("offer", psid);
+    return out(true);
+  }
+  if (payload === "LEAD_Q") {
+    L.tag = "intent"; L.stage = "q"; await setL(psid, L);
+    await F()._send(psid, "Асуултаа бичнэ үү 🙂"); return out(true);
+  }
+  if (/^LEAD_F_/.test(payload)) { L.tag = "intent"; await setL(psid, L); await F()._send(psid, OFFER_MSG, ORDER_BTN); return out(true); }
   if (payload === "LEAD_SVC" || payload === "BIZ_PROJECT") {
     if (L.tag !== "intent") { L.tag = "intent"; if (payload === "LEAD_SVC") await count("btn_svc", psid); await count("cat_intent", psid); }
     await setL(psid, L); return out(false);
@@ -128,7 +185,20 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
   }
   if (payload || !text || L.tag === "intent" || yat) { await setL(psid, L); return out(false); }
 
+  const askTopic = async (topic, machine) => {
+    L.stage = "asked_funding"; L.topic = topic; await count("topic_q", psid);
+    await setL(psid, L); await F()._send(psid, topicQ(topic, machine), FUND_BTN); return out(true);
+  };
+  const kw = await kwMatch(text);
+  if (kw) { await count("kw", psid); L.tag = "intent"; await count("cat_intent", psid); return askTopic(kw, false); }
+
   const c = await classify(text);
+  if (c.cat === "intent" && c.topic) {
+    L.tag = "intent"; await count("cat_intent", psid);
+    if (c.hot) await notifyHot(psid, text, L);
+    return askTopic(c.topic, false);
+  }
+  if (c.cat === "machine" && c.topic) { await count("cat_machine", psid); L.tag = "intent"; return askTopic(c.topic, true); }
   if (c.cat === "intent") {
     L.tag = "intent"; await count("cat_intent", psid);
     if (c.hot) await notifyHot(psid, text, L);
