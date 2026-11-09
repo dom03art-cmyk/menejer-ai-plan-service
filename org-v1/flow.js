@@ -593,3 +593,6 @@ module.exports.handleMessage = handle;
 module.exports.adminAction = admin;
 module.exports._getF = getF;
 module.exports._setF = setF;
+module.exports._send = send;
+module.exports._sendImage = sendImage;
+module.exports._client = client;

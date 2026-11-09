@@ -13,6 +13,7 @@ const { newUsage, withUsage } = require("../plan-v2/claude");
 const router = express.Router();
 router.use(upload);
 router.use(require("./flow"));
+try { router.use(require("./lead")); } catch (e) { console.error("[lead] ачаалж чадсангүй:", e.message); }
 router.use(require("./qpay").router);
 const jobs = new Map(), activeByPsid = new Map(), queue = []; let running = 0;
 const MAX_PARALLEL = Number(process.env.ORG_MAX_PARALLEL || 1);

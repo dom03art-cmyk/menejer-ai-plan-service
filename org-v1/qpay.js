@@ -86,6 +86,7 @@ async function createInvoice({ psid, amount, description, kind = "flow", meta = 
   // Хөнгөлөлтийн код (захиалагч идэвхжүүлсэн бол)
   let promo = null; try { promo = require("./promo").apply(String(psid), kind, meta, amount); } catch (e) { console.warn("[qpay] promo:", e.message); }
   if (promo) amount = promo.amount;
+  if (kind === "biz" || kind === "flow") { try { require("./lead").count("qr", String(psid)); } catch (_) { } }
   const no = `MA${Date.now().toString(36)}${crypto.randomBytes(3).toString("hex")}`.toUpperCase(); // давтагдашгүй
   const body = {
     invoice_code: process.env.QPAY_INVOICE_CODE, sender_invoice_no: no, invoice_receiver_code: "terminal",
@@ -146,6 +147,7 @@ async function settle(no, via = "callback") {
     }
     rec.status = "paid"; rec.paidAt = Date.now(); rec.payment_id = payment_id; rec.paid = paid; await saveInv(rec);
     console.log(`[qpay] ${no} төлөгдлөө ${paid}₮ (${rec.kind}, ${via})`);
+    if (rec.kind === "biz" || rec.kind === "flow") { try { require("./lead").count("paid", String(rec.psid)); } catch (_) { } }
     if (rec.promo) { try { require("./promo").consume(rec.psid, rec.promo.code); } catch (e) { console.warn("[qpay] promo consume:", e.message); } }
     const h = handlers[rec.kind];
     if (h) await h(rec).catch((e) => console.error("[qpay] handler алдаа", e));
@@ -179,6 +181,7 @@ async function forceSettle(no) {
     let paid = rec.partial || 0; try { paid = (await paidAmount(rec)).paid; } catch (_) { }
     rec.status = "paid"; rec.paidAt = Date.now(); rec.paid = paid; rec.forced = true; await saveInv(rec);
     console.log(`[qpay] ${no} админ гараар баталлаа ${paid}/${rec.amount}₮ (${rec.kind})`);
+    if (rec.kind === "biz" || rec.kind === "flow") { try { require("./lead").count("paid", String(rec.psid)); } catch (_) { } }
     if (rec.promo) { try { require("./promo").consume(rec.psid, rec.promo.code); } catch (_) { } }
     const h = handlers[rec.kind];
     if (h) await h(rec).catch((e) => console.error("[qpay] handler алдаа", e));
