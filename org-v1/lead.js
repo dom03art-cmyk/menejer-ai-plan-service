@@ -71,9 +71,15 @@ async function kwMatch(text) {
 async function kwAdmin(text) {
   let m = text.match(/^түлхүүр\s+устга\s+(.+)$/i);
   if (m) { const k = normKw(m[1]); return (await kwDel(k)) ? `🗑 «${k}» устгалаа.` : `«${k}» олдсонгүй.`; }
-  m = text.match(/^түлхүүр\s+(.+?)\s*=\s*(.+)$/i);
-  if (m) { const k = normKw(m[1]), v = m[2].trim().replace(/\s*бизнес$/i, ""); if (!k) return "Түлхүүр хоосон байна."; await kwSet(k, v); return `✅ «${k}» → «${v} бизнес сонирхож байна уу? …» гэж эхэлнэ.`; }
-  if (/^түлхүүрүүд$/i.test(text)) { const a = Object.entries(await kwAll()); return a.length ? "🔑 Түлхүүр үгс:\n" + a.map(([k, v]) => `• ${k} = ${v}`).join("\n") : "Түлхүүр үг алга. Нэмэх: «түлхүүр ЯС = Ясны шөлний нунтгийн»"; }
+  m = text.match(/^түлхүүр\s+([^=\n]+?)\s*=\s*([\s\S]+)$/i);
+  if (m) {
+    const k = normKw(m[1]); if (!k) return "Түлхүүр хоосон байна.";
+    const { topic, detail } = splitKw(m[2]); if (!topic) return "Сэдвийн нэр хоосон байна.";
+    await kwSet(k, detail ? `${topic} | ${detail}` : topic);
+    const info = await kwInfo(topic, detail, true);
+    return `✅ «${k}» нэмэгдлээ${detail ? " (нарийвчилсан сэдэвтэй)" : ""}. «${k}» гэж бичсэн хүнд дараах хариу очно:\n\n${kwMsg(topic, info)}\n\nӨөрчлөх бол дахин «түлхүүр ${k} = …» гэж бичнэ.`;
+  }
+  if (/^түлхүүрүүд$/i.test(text)) { const a = Object.entries(await kwAll()); return a.length ? "🔑 Түлхүүр үгс:\n" + a.map(([k, v]) => `• ${k} = ${v.length > 120 ? v.slice(0, 120) + "…" : v}`).join("\n") : "Түлхүүр үг алга. Нэмэх: «түлхүүр ЯС = Ясны шөлний нунтгийн» эсвэл нарийвчилбал «түлхүүр ЯС = Ясны шөлний нунтгийн | юуг онцлох тайлбар»"; }
   return null;
 }
 
@@ -117,12 +123,20 @@ const SVC_BTN = [["📄 Төсөл бичүүлэх", "BIZ_PROJECT"], ["💡 З�
 const KWI = `Чи «Менежер AI» Facebook пэйжийн туслах. Пэйж бизнес санааны бичлэг гаргадаг, бичлэгт гарсан машин, бараа ЗАРДАГГҮЙ; бизнес төсөл бэлтгэдэг.
 Хүн бичлэг үзээд тухайн бизнесийн нэрийг бичжээ. Тэр бизнесийн талаар 2–3 өгүүлбэрээр ерөнхий, үнэн мэдээлэл өг: юу хийдэг бизнес, хэнд зарагддаг, эхлэхэд юуг анхаарах вэ. Тоо, үнэ, ашгийн хувь, хаанаас авах зэргийг ЗОХИОХГҮЙ, дурдахгүй. Монгол, кирилл, «Та» гэж. Төгсгөлд нэг өгүүлбэр бүү нэм — товчийг код нэмнэ.
 Зөвхөн JSON: {"text":""}`;
-async function kwInfo(topic) {
-  const c = await F()._client(), k = `lead:kwinfo:${normKw(topic)}`;
-  try { if (c) { const v = await c.get(k); if (v) return v; } } catch (_) { }
+// Түлхүүрийн утга: «Сэдэв» эсвэл «Сэдэв | нарийвчилсан чиглэл» (эзний заасан, AI үүнийг баримтална)
+function splitKw(v) {
+  const s = String(v || ""), i = s.indexOf("|");
+  const topic = (i < 0 ? s : s.slice(0, i)).trim().replace(/\s*бизнес(ийн)?$/i, "").slice(0, 80);
+  return { topic, detail: i < 0 ? "" : s.slice(i + 1).trim().slice(0, 1500) };
+}
+const kwInfoMem = new Map();
+async function kwInfo(topic, detail = "", fresh = false) {
+  const c = await F()._client(), k = `lead:kwinfo:${normKw(topic)}:${require("crypto").createHash("md5").update(detail).digest("hex").slice(0, 8)}`;
+  if (!fresh) try { const v = c ? await c.get(k) : kwInfoMem.get(k); if (v) return v; } catch (_) { }
   let t = "";
-  try { const o = await callJSON({ system: KWI, user: `Бизнес: ${topic} бизнес`, model: process.env.LEAD_MODEL || FAST, maxTokens: 500 }); t = String(o.text || "").trim().slice(0, 700); } catch (e) { console.warn("[lead] kwinfo:", e.message); }
-  if (t && c) try { await c.set(k, t, { EX: 30 * 86400 }); } catch (_) { }
+  const user = `Бизнес: ${topic} бизнес` + (detail ? `\nПэйжийн эзний заасан нарийвчилсан сэдэв, чиглэл (үүнийг баримтал, үүнээс гадуур бүү зохио):\n${detail}` : "");
+  try { const o = await callJSON({ system: KWI, user, model: process.env.LEAD_MODEL || FAST, maxTokens: 600 }); t = String(o.text || "").trim().slice(0, 900); } catch (e) { console.warn("[lead] kwinfo:", e.message); }
+  if (t) try { if (c) await c.set(k, t); else kwInfoMem.set(k, t); } catch (_) { }
   return t;
 }
 const kwMsg = (topic, info) => `Сайн байна уу! 👋 ${topic} бизнесийн бичлэгийг үзсэнд баярлалаа.\n\n${info ? info + "\n\n" : ""}Бид бичлэгт гарсан тоног төхөөрөмж, бараа зардаггүй. Харин энэ бизнесийг эхлүүлэх хөрөнгө оруулалт, зардал, ашгийг тооцсон бизнес төслийг бэлтгэж өгдөг. Хэрэгтэй бол доорх товчийг дарна уу.`;
@@ -222,8 +236,9 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
   };
   const kw = await kwMatch(text);
   if (kw) {
-    await count("kw", psid); L.tag = "info"; L.topic = kw; await setL(psid, L);
-    await F()._send(psid, kwMsg(kw, await kwInfo(kw)), [SVC_BTN[0]]); return out(true);
+    const { topic, detail } = splitKw(kw);
+    await count("kw", psid); L.tag = "info"; L.topic = topic; await setL(psid, L);
+    await F()._send(psid, kwMsg(topic, await kwInfo(topic, detail)), [SVC_BTN[0]]); return out(true);
   }
 
   const c = await classify(text);
