@@ -133,9 +133,9 @@ const sampleUrls = () => {
   const v = String(process.env.SAMPLE_IMAGES || "").trim();
   if (v === "off") return [];
   if (v) return v.split(",").map((x) => x.trim()).filter(Boolean);
-  return [1, 2, 3].map((n) => `${BASE_URL()}/guide-samples/${n}.jpg`);
+  return [1, 2, 3].map((n) => `${BASE_URL()}/guide-samples/${n}.jpg?v=2`);
 };
-const SAMPLE_CAP = "📄 Дээрх нь Менежер AI-ийн бэлтгэсэн бодит баримтын жишээ хуудсууд (маркетингийн төлөвлөгөөнөөс, тоо, нууц мэдээллийг далдалсан). Бизнес төсөл ч мөн ийм хүснэгт, графиктай, 50–75 хуудсаар гарна.";
+const SAMPLE_CAP = "📄 Дээрх нь Менежер AI-ийн бэлтгэсэн бизнес төслийн жишээ хуудсууд (тоо, нууц мэдээллийг далдалсан). Таны төсөл ч ийм бүтэц, хүснэгт, графиктай, 50–75 хуудсаар PDF + Word + Excel-ээр гарна.";
 async function sendSamples(psid) {
   const urls = sampleUrls(); if (!urls.length) return false;
   for (const u of urls.slice(0, 5)) await F()._sendImage(psid, u);
