@@ -170,7 +170,11 @@ const sampleUrls = (kind) => {
 };
 const REPORT_CAP = "📄 Дээрх нь Менежер AI-ийн бэлтгэсэн тайлангийн жишээ хуудсууд (байгууллага, нэр, тоог далдалсан). Таны өгсөн Excel, баримт, тэмдэглэлээс ийм хүснэгт, графиктай тайлан гарна.";
 const SAMPLE_CAP = "📄 Дээрх нь Менежер AI-ийн бэлтгэсэн бизнес төслийн жишээ хуудсууд (тоо, нууц мэдээллийг далдалсан). Таны төсөл ч ийм бүтэц, хүснэгт, графиктай, 50–75 хуудсаар PDF + Word + Excel-ээр гарна.";
+// Бизнес төслийн жишээ: зургийн оронд төслийн бүтцийг харуулсан рийлийн холбоос (богино, ойлгомжтой). SAMPLE_REEL=off — унтраах.
+const SAMPLE_REEL = () => { const v = String(process.env.SAMPLE_REEL || "https://www.facebook.com/reel/2873331499697255").trim(); return v === "off" ? "" : v; };
+const reelLine = () => SAMPLE_REEL() ? `📽 Бизнес төсөл ямар бүтэцтэй, юу агуулдгийг энэ бичлэгээс үзнэ үү:\n${SAMPLE_REEL()}` : "";
 async function sendSamples(psid, kind) {
+  if (kind !== "report") { const r = reelLine(); if (!r) return false; await F()._send(psid, r); return true; }
   const urls = sampleUrls(kind); if (!urls.length) return false;
   for (const u of urls.slice(0, 5)) await F()._sendImage(psid, u);
   await F()._send(psid, kind === "report" ? REPORT_CAP : SAMPLE_CAP);
@@ -206,8 +210,7 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
     const fund = fundOf(payload, text);
     if (fund !== "other") await count("fund_" + fund, psid);
     L.stage = "offered"; L.fund = fund; L.tag = "intent"; await setL(psid, L);
-    await sendSamples(psid).catch((e) => console.warn("[lead] samples:", e.message));
-    await F()._send(psid, explain(fund, L.topic));
+    await F()._send(psid, explain(fund, L.topic) + (reelLine() ? "\n\n" + reelLine() : ""));
     await F()._send(psid, OFFER_MSG, orderBtn());
     await count("offer", psid);
     return out(true);
