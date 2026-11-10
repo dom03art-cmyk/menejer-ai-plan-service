@@ -9,7 +9,7 @@
 // LEAD_ENABLED=1 эсвэл LEAD_TEST_PSIDS-д байгаа хүнд л ажиллана; бусдад хоосон хариу буцааж, хуучин урсгал хэвээр үлдэнэ.
 // Үе шат бүрийг долоо хоногоор тоолно (админ Messenger-т «статистик» гэж бичвэл тайлан ирнэ).
 const express = require("express");
-const { callJSON, FAST } = require("../plan-v2/claude");
+const { callJSON, FAST, WRITER } = require("../plan-v2/claude");
 const router = express.Router();
 const ADMIN = () => String(process.env.ADMIN_PSID || "");
 const F = () => require("./flow");
@@ -99,7 +99,7 @@ const CLS = `Чи «Менежер AI» Facebook пэйжийн чатын ан�
 - "unclear": мэндчилгээ, нэг үг, тодорхойгүй.
 topic: мессежид тодорхой бизнес, бүтээгдэхүүн, машин нэрлэсэн бол тэр бизнесийн нэрийг ХАРЬЯАЛАХ тийн ялгалаар, том үсгээр эхэлж бич (жишээ: «Ясны шөлний нунтгийн», «Лазер зүсэлтийн», «Хадаасны үйлдвэрлэлийн», «Кофе шопын»). «бизнес» гэдэг үгийг бүү нэм. Тодорхой сэдэвгүй бол "".
 hot=true: зөвхөн intent бөгөөд тодорхой бизнес, төсөл нэрлэсэн бол (жишээ нь «хадаасны цехийн төсөл хэрэгтэй»).
-info бол reply-д асуултад нь 1–2 өгүүлбэрээр ерөнхий, үнэн мэдээлэл өг (тоо, үнэ зохиохгүй, машин зардаггүй), төгсгөлд «Энэ бизнесийг эхлүүлэх төсөл, тооцоо хэрэгтэй бол доорх товчийг дарна уу» гэж нэм. Бусад ангилалд reply хоосон.
+reply үргэлж хоосон "" (хариуг код бичнэ).
 Монгол, кирилл, «Та» гэж. Зөвхөн JSON: {"cat":"intent|machine|info|unclear","hot":false,"topic":"","reply":""}`;
 const cleanTopic = (x) => String(x || "").replace(/["«»]/g, "").replace(/\s*бизнес(ийн)?\s*$/i, "").trim().slice(0, 60);
 async function classify(text) {
@@ -135,13 +135,14 @@ async function kwInfo(topic, detail = "", fresh = false) {
   if (!fresh) try { const v = c ? await c.get(k) : kwInfoMem.get(k); if (v) return v; } catch (_) { }
   let t = "";
   const user = `Бизнес: ${topic} бизнес` + (detail ? `\nПэйжийн эзний заасан нарийвчилсан сэдэв, чиглэл (үүнийг баримтал, үүнээс гадуур бүү зохио):\n${detail}` : "");
-  try { const o = await callJSON({ system: KWI, user, model: process.env.LEAD_MODEL || FAST, maxTokens: 600 }); t = String(o.text || "").trim().slice(0, 900); } catch (e) { console.warn("[lead] kwinfo:", e.message); }
+  try { const o = await callJSON({ system: KWI, user, model: process.env.LEAD_KW_MODEL || WRITER, maxTokens: 800 }); t = String(o.text || "").trim().slice(0, 900); } catch (e) { console.warn("[lead] kwinfo:", e.message); }
   if (t) try { if (c) await c.set(k, t); else kwInfoMem.set(k, t); } catch (_) { }
   return t;
 }
 const kwMsg = (topic, info) => `Сайн байна уу! 👋 ${topic} бизнесийн бичлэгийг үзсэнд баярлалаа.\n\n${info ? info + "\n\n" : ""}Бид бичлэгт гарсан тоног төхөөрөмж, бараа зардаггүй. Харин энэ бизнесийг эхлүүлэх хөрөнгө оруулалт, зардал, ашгийг тооцсон бизнес төслийг бэлтгэж өгдөг. Хэрэгтэй бол доорх товчийг дарна уу.`;
 const MACHINE_MSG = "Сайн байна уу! Бид бизнес санааны бичлэгүүдээ хөдөлмөр эрхлэлтийг дэмжих зорилгоор хуваалцдаг бөгөөд бичлэгт гарсан машин, тоног төхөөрөмж зардаггүй 🙏\n\nХарин энэ бизнесийг эхлүүлэх бол хөрөнгө оруулалт, зардал, ашгийг тооцсон бизнес төслийг бэлтгэж өгдөг. Хэрэгтэй бол доорх товчийг дарна уу.";
 const INFO_MSG = "Менежер AI бол бизнес төсөл, бизнес төлөвлөгөө, маркетингийн төлөвлөгөө, тайлан бэлтгэдэг үйлчилгээ. Бизнес санааны бичлэгүүдээ хөдөлмөр эрхлэлтийг дэмжих зорилгоор хуваалцдаг, машин, тоног төхөөрөмж зардаггүй.\n\nТөсөл, төлөвлөгөө хэрэгтэй болвол хэзээ ч бичээрэй 🙂";
+const infoMsg = (topic) => `Сайн байна уу! 👋 ${topic ? topic + " бизнесийн" : "Бизнес санааны"} бичлэгийг сонирхсонд баярлалаа.\n\nБид бизнес санааны бичлэгүүдээ хөдөлмөр эрхлэлтийг дэмжих зорилгоор хуваалцдаг бөгөөд бичлэгт гарсан тоног төхөөрөмж, бараа зардаггүй. Харин ${topic ? "энэ" : "сонирхсон"} бизнесээ эхлүүлэх хөрөнгө оруулалт, зардал, ашгийг тооцсон бизнес төслийг бэлтгэж өгдөг. Хэрэгтэй бол доорх товчийг дарна уу.`;
 const ASK_MSG = "Сайн байна уу! 👋 Менежер AI — бизнес төсөл, төлөвлөгөө, тайлан бэлтгэдэг үйлчилгээ.\n\nТанд юу хэрэгтэй вэ?";
 const FUND_BTN = [["💰 Өөрийн хөрөнгөөр", "LEAD_F_OWN"], ["🏦 Зээл авна", "LEAD_F_LOAN"], ["🔎 Судалж байна", "LEAD_F_RESEARCH"]];
 const ORDER_BTN_ALL = [["✅ Төсөл захиалах", "BIZ_ORDER"], ["❓ Асуулт байна", "LEAD_Q"]];
@@ -257,9 +258,9 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
     await count("cat_machine", psid); L.tag = "info";
     await setL(psid, L); await F()._send(psid, MACHINE_MSG, [SVC_BTN[0]]); return out(true);
   }
-  if (c.cat === "info" && c.reply) {
-    await count("cat_info", psid); L.tag = "info";
-    await setL(psid, L); await F()._send(psid, c.reply, [SVC_BTN[0]]); return out(true);
+  if (c.cat === "info") { // AI-аар баримт бичүүлэхгүй — бэлэн загвар (сэдвийн нэр л орно)
+    await count("cat_info", psid); L.tag = "info"; if (c.topic) L.topic = c.topic;
+    await setL(psid, L); await F()._send(psid, infoMsg(c.topic), [SVC_BTN[0]]); return out(true);
   }
   await count("cat_unclear", psid);
   await setL(psid, L); await F()._send(psid, ASK_MSG, SVC_BTN); return out(true);
