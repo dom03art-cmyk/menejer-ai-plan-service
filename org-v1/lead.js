@@ -192,6 +192,7 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
   const base = { sales: "", handled: "0", tag: "" };
   if (!psid || !enabled(psid)) return base;
   if (psid === ADMIN() && /^(статистик|воронк|юүлүүр)$/i.test(text)) { await F()._send(psid, await reportText()); return { ...base, handled: "1" }; }
+  if (psid === ADMIN() && /^(кредит|make кредит)$/i.test(text)) { await F()._send(psid, await require("./makewatch").reportText()); return { ...base, handled: "1" }; }
   if (psid === ADMIN() && /^түлхүүр/i.test(text)) { const r = await kwAdmin(text); if (r) { await F()._send(psid, r); return { ...base, handled: "1" }; } }
   const L = await getL(psid);
   const yat = String(sales_ref || "") === "yatgah";
@@ -278,6 +279,7 @@ router.post("/lead/classify", express.json(), auth, async (req, res) => {
   catch (e) { console.warn("[lead]", e.message); res.json({ sales: "", handled: "0", tag: "" }); }
 });
 module.exports = router;
+try { require("./makewatch").start(); } catch (e) { console.warn("[makewatch] start:", e.message); }
 module.exports.handleLead = handle; // «handle» нэр нь express router-ийн дотоод функцтэй давхцдаг тул өөр нэр
 module.exports.count = count;
 module.exports.classify = classify;
