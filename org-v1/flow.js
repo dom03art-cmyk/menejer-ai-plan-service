@@ -214,6 +214,13 @@ const BP_INTERVIEW = `Чи «Менежер AI»-ийн БИЗНЕС ТӨЛӨВ�
 - ЭРГЭЛЗЭЭ, ЭСЭРГҮҮЦЭЛ: «үнэтэй», «яагаад хэрэгтэй», «өөрөө хийж болно», «бодъё» гэвэл тэр мессежид мэдээлэл ҮЛ асуу, итгүүлж хариул: юу авах (зах зээлийн судалгаа, 3 жилийн стратеги, үйл ажиллагааны хуваарь, санхүүгийн төсөөлөл, Excel загвар, хяналтын үзүүлэлт), яагаад хэрэгтэй (төлөвлөгөөгүй өсөлт ихэвчлэн мөнгөн хомсдол, буруу хөрөнгө оруулалтаар төгсдөг; хамтрагч, хөрөнгө оруулагч төлөвлөгөө шаарддаг), үнийн харьцуулалт (мэргэжилтэнд бичүүлэх эсвэл өөрөө олон долоо хоног зарцуулахтай харьцуул). Ашиг заавал өснө гэж баталгаа өгөхгүй. Хуурамч хөнгөлөлт, «өнөөдөр л» гэх дарамт, зохиомол сэтгэгдэл хэрэглэхгүй. Ятгасны дараа нэг тодорхой алхмаар төгсгө. Сонирхохгүй гэвэл шахахгүй.
 - Хангалттай мэдээлэл (1, 2, 3, 8 заавал; бусад нь боломжтой бол) цугларсан эсвэл захиалагч «болсон, эхлүүл» гэвэл ready=true; reply-д цуглуулсан гол мэдээллийг 3–6 мөрөөр товч давтаж бич (үнэ, төлбөрийн мэдээллийг бичихгүй).
 Зөвхөн JSON: {"reply":"захиалагчид илгээх текст","ready":false,"blocked":false}`;
+const MKT_HELLO = () => `📣 Маркетингийн төлөвлөгөө — ${fmtMoney(MKT_PRICE)}\n\n40–75 хуудас, алхам алхмаар хэрэгжүүлэх хөтөч: зах зээл, өрсөлдөгчийн шинжилгээ, маркетингийн стратеги, зарын бэлэн текст, 30 хоногийн контент календарь, сар бүрийн төсөв, үр дүнгийн тооцоо (PDF, Word, Excel).\n\nДоорх мэдээллийг НЭГ мессежид бүгдийг нь багтааж бичнэ үү:\n1. Юуг сурталчлах вэ (бүтээгдэхүүн/үйлчилгээ, байгууллага эсвэл өөрийгөө), нэр\n2. Юу санал болгодог, үнэ\n3. Хэнд зарах вэ (зорилтот хэрэглэгч)\n4. Сард маркетингт зарцуулах төсөв\n5. Хэзээнээс эхлэх, гол зорилго\n\nМэдэхгүй зүйлээ «мэдэхгүй» гэж бичиж болно. Олон жижиг мессеж болгон тасалбал зарим мэдээлэл орохгүй үлдэх эрсдэлтэй.`;
+// Маркетинг, бизнес төлөвлөгөө: ЭХЛЭЭД төлбөр, дараа нь мэдээлэл цуглуулах ярилцлага (кредит дэмий үрэгдэхгүй). PREPAY_INTERVIEW=0 бол хуучин дараалал.
+const PREPAY = () => process.env.PREPAY_INTERVIEW !== "0";
+const ASK_RE = /\n\nДоорх мэдээллийг НЭГ мессежид[\s\S]*$/;
+const introOf = (hello) => hello.replace(ASK_RE, "") + "\n\nТөлбөр орсны дараа төлөвлөгөөнд хэрэгтэй мэдээллийг тань асууж цуглуулаад, ихэвчлэн 30–90 минутад бэлдэж илгээнэ.";
+const askOf = (hello) => "Төлбөр баталгаажлаа ✅ Баярлалаа!\n\n" + ((hello.match(/Доорх мэдээллийг НЭГ мессежид[\s\S]*$/) || [hello])[0]);
+const paidInterview = (f) => !!(f && f.paid && (f.s === "mkt_interview" || f.s === "bp_interview"));
 const BP_HELLO = () => `📘 Бизнес төлөвлөгөө — ${fmtMoney(BP_PRICE)}\n\nБизнесээ удирдах, өсгөх 3 жилийн төлөвлөгөө (50–70 хуудас): зах зээл, өрсөлдөгчийн судалгаа, стратеги, зорилт, үйл ажиллагааны хуваарь, санхүүгийн төсөөлөл, гол үзүүлэлтийн хяналт (PDF, Word, Excel).\n\n💡 Банк, сангаас зээл авах бол «Бизнес төсөл»-ийг сонгоно уу.\n\nДоорх мэдээллийг НЭГ мессежид бүгдийг нь багтааж бичнэ үү:\n1. Бизнесийн нэр, юу хийдэг, хаана\n2. Шинэ эсвэл ажиллаж байгаа (ажиллаж байгаа бол сарын борлуулалт)\n3. Бүтээгдэхүүн/үйлчилгээ, үнэ, өртөг\n4. Ажилтан, сарын гол зардал\n5. 3 жилийн гол зорилго, хөрөнгө оруулалтын төлөвлөгөө\n\n⚠️ Аль болох дэлгэрэнгүй, бодит тоотой бичих тусам төлөвлөгөө үнэн зөв гарна. Олон жижиг мессеж болгон тасалбал зарим мэдээлэл орохгүй үлдэх эрсдэлтэй. Мэдэхгүй зүйлээ «мэдэхгүй» гэж бичиж болно.`;
 
 async function interview(f, text, system = INTERVIEW) {
@@ -361,17 +368,24 @@ async function handle({ psid, text, payload, attachments }) {
   try { const TN = require("../tender-v1/flow"); if (await TN.claims(psid, payload, text)) return await TN.handle({ psid, text, payload, attachments }); } catch (e) { console.warn("[flow] tender:", e.message); }
 
   // Үндсэн цэсний сонголтууд (аль ч төлөвөөс, боловсруулж байгаагаас бусад)
+  if (paidInterview(f) && (["BIZ_PROJECT", "BIZ_PLAN", "MKT_PLAN", "ORG_PLAN", "ORG_REPORT", "FLOW_MENU", "FLOW_CANCEL"].includes(payload) || payload.startsWith("FLOW_G_") || CANCEL.test(text))) {
+    await send(psid, "Таны төлбөр орсон тул захиалгаа үргэлжлүүлье 🙏 Төлөвлөгөөнд хэрэгтэй мэдээллээ бичнэ үү. Өөр асуудал байвал манай ажилтан тантай холбогдоно.");
+    if (ADMIN() && (payload === "FLOW_CANCEL" || CANCEL.test(text))) await send(ADMIN(), `ℹ️ ${psid}: төлбөр төлсөн захиалагч цуцлахыг хүслээ (${NAMES[f.product]}). Шаардлагатай бол холбогдоно уу.`);
+    return "ext";
+  }
   if (payload === "BIZ_PROJECT") { if (f.s === "processing") return "ext"; await setF(psid, { s: "left" }); await send(psid, "Бизнес төсөл сонголоо. Үргэлжлүүлэхийн тулд доорх товчийг дахин дарна уу.", [["Бизнес төсөл", "BIZ_PROJECT"]]); return "selecting_type"; }
   if ((["BIZ_PLAN", "MKT_PLAN", "ORG_PLAN", "ORG_REPORT"].includes(payload) || payload === "FLOW_G_dept" || payload === "FLOW_G_org") && f.s !== "processing" && f.s !== "payment_review") {
     if (payload === "BIZ_PLAN") {
+      if (PREPAY()) { f = { s: "awaiting_payment", product: "bplan", conv: [], prepay: true }; await send(psid, introOf(BP_HELLO())); await askPayment(psid, f); await setF(psid, f); return "ext"; }
       f = { s: "bp_interview", product: "bplan", conv: [] };
       const hello = BP_HELLO();
       f.conv.push({ role: "Менежер AI", text: hello });
       await setF(psid, f); await send(psid, hello, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
     if (payload === "MKT_PLAN") {
+      if (PREPAY()) { f = { s: "awaiting_payment", product: "marketing", conv: [], prepay: true }; await send(psid, introOf(MKT_HELLO())); await askPayment(psid, f); await setF(psid, f); return "ext"; }
       f = { s: "mkt_interview", product: "marketing", conv: [] };
-      const hello = `📣 Маркетингийн төлөвлөгөө — ${fmtMoney(MKT_PRICE)}\n\n40–75 хуудас, алхам алхмаар хэрэгжүүлэх хөтөч: зах зээл, өрсөлдөгчийн шинжилгээ, маркетингийн стратеги, зарын бэлэн текст, 30 хоногийн контент календарь, сар бүрийн төсөв, үр дүнгийн тооцоо (PDF, Word, Excel).\n\nДоорх мэдээллийг НЭГ мессежид бүгдийг нь багтааж бичнэ үү:\n1. Юуг сурталчлах вэ (бүтээгдэхүүн/үйлчилгээ, байгууллага эсвэл өөрийгөө), нэр\n2. Юу санал болгодог, үнэ\n3. Хэнд зарах вэ (зорилтот хэрэглэгч)\n4. Сард маркетингт зарцуулах төсөв\n5. Хэзээнээс эхлэх, гол зорилго\n\nМэдэхгүй зүйлээ «мэдэхгүй» гэж бичиж болно. Олон жижиг мессеж болгон тасалбал зарим мэдээлэл орохгүй үлдэх эрсдэлтэй.`;
+      const hello = MKT_HELLO();
       f.conv.push({ role: "Менежер AI", text: hello });
       await setF(psid, f); await send(psid, hello, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
@@ -390,17 +404,17 @@ async function handle({ psid, text, payload, attachments }) {
       if (atts.length && !text) { await send(psid, "Зураг, файлыг энэ шатанд уншихгүй. Мэдээллээ текстээр бичнэ үү 🙏"); return "ext"; }
       if (!text) return "ext";
       const r = await interview(f, text, BP_INTERVIEW);
-      if (r.blocked) { await setF(psid, { s: "left" }); await send(psid, r.reply); return "selecting_type"; }
-      if (r.ready) { await send(psid, r.reply); await askPayment(psid, f); await setF(psid, f); return "ext"; }
-      await setF(psid, f); await send(psid, r.reply, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
+      if (r.blocked) { if (f.paid && ADMIN()) await send(ADMIN(), `⚠️ ${psid}: төлбөр төлсөн (${NAMES[f.product]}) боловч зөвшөөрөгдөөгүй агуулгаар зогслоо. Төлбөр буцаах эсэхийг шийдээрэй.`); await setF(psid, { s: "left" }); await send(psid, r.reply); return "selecting_type"; }
+      if (r.ready) { await send(psid, r.reply); if (f.paid) await startPaid(psid, f); else await askPayment(psid, f); await setF(psid, f); return "ext"; }
+      await setF(psid, f); await send(psid, r.reply, f.paid ? undefined : [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
     case "mkt_interview": {
       if (atts.length && !text) { await send(psid, "Зураг, файлыг энэ шатанд уншихгүй. Мэдээллээ текстээр бичнэ үү 🙏"); return "ext"; }
       if (!text) return "ext";
       const r = await interview(f, text);
-      if (r.blocked) { await setF(psid, { s: "left" }); await send(psid, r.reply); return "selecting_type"; }
-      if (r.ready) { await send(psid, r.reply); await askPayment(psid, f); await setF(psid, f); return "ext"; }
-      await setF(psid, f); await send(psid, r.reply, [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
+      if (r.blocked) { if (f.paid && ADMIN()) await send(ADMIN(), `⚠️ ${psid}: төлбөр төлсөн (${NAMES[f.product]}) боловч зөвшөөрөгдөөгүй агуулгаар зогслоо. Төлбөр буцаах эсэхийг шийдээрэй.`); await setF(psid, { s: "left" }); await send(psid, r.reply); return "selecting_type"; }
+      if (r.ready) { await send(psid, r.reply); if (f.paid) await startPaid(psid, f); else await askPayment(psid, f); await setF(psid, f); return "ext"; }
+      await setF(psid, f); await send(psid, r.reply, f.paid ? undefined : [["Цуцлах", "FLOW_CANCEL"]]); return "ext";
     }
     case "uploading":
       if (wantsTalk(f, text, payload)) { const rep = await persuade(f, text); await setF(psid, f); if (rep) await send(psid, rep); }
@@ -477,6 +491,18 @@ async function admin(payload) {
   return approve(psid, f, "admin");
 }
 
+// Урьдчилж төлсөн захиалгын ярилцлага дууссан: ажлыг эхлүүлнэ
+async function startPaid(psid, f) {
+  try {
+    await startJob(psid, f);
+    await send(psid, "Мэдээлэл бүрдлээ ✅ Таны захиалгыг боловсруулж эхэллээ. Ихэвчлэн 30–90 минутад файлууд энд ирнэ.");
+    if (ADMIN()) await send(ADMIN(), `✅ Мэдээлэл бүрдэж, боловсруулж эхэллээ: ${NAMES[f.product]} (${psid})`);
+  } catch (e) {
+    if (ADMIN()) await send(ADMIN(), `⚠️ ${psid}: ажил эхлүүлж чадсангүй — ${e.message}`);
+    await send(psid, "Мэдээлэл бүрдлээ ✅ Боловсруулалт эхлэхэд түр саатал гарлаа, манай ажилтан удахгүй эхлүүлнэ.");
+  }
+}
+
 // Төлбөр баталгаажсан: админ «Батлах» дарсан эсвэл QPay төлбөр орж ирсэн
 async function approve(psid, f, via) {
   const tag = via === "qpay" ? `💳 QPay төлбөр орлоо ${fmtMoney((f.qpay && f.qpay.amount) || f.price || 0)} — ` : "";
@@ -487,6 +513,13 @@ async function approve(psid, f, via) {
     await setF(psid, { s: "rev_request", part: f.rev.part, product: f.rev.part });
     await send(psid, `${via === "qpay" ? "QPay төлбөр амжилттай орлоо. " : ""}Нэмэлт засварын төлбөр баталгаажлаа ✅\n\nЯмар засвар хийлгэхээ нэг мессежинд дэлгэрэнгүй бичнэ үү: аль хэсэг, юу болгох, зөв тоо.`, [["Цуцлах", "FLOW_CANCEL"]]);
     if (ADMIN()) await send(ADMIN(), `${tag}✅ Нэмэлт засварын төлбөр баталгаажлаа: ${NAMES[f.rev.part]} (${psid})`); return { ok: true };
+  }
+  if (f.prepay && !f.paid) {
+    const ask = askOf(f.product === "bplan" ? BP_HELLO() : MKT_HELLO());
+    Object.assign(f, { s: f.product === "bplan" ? "bp_interview" : "mkt_interview", paid: true, paidAt: Date.now(), conv: [{ role: "Менежер AI", text: ask }] });
+    await setF(psid, f); await send(psid, ask);
+    if (ADMIN()) await send(ADMIN(), `${tag}✅ ${via === "qpay" ? "Автоматаар баталгаажлаа" : "Баталлаа"}, мэдээлэл цуглуулж эхэллээ: ${NAMES[f.product]} (${psid})`);
+    return { ok: true };
   }
   if (via === "qpay") await send(psid, "QPay төлбөр амжилттай орлоо ✅ Таны захиалгыг боловсруулж эхэлж байна.");
   try { await startJob(psid, f); await setF(psid, f); if (ADMIN()) await send(ADMIN(), `${tag}✅ ${via === "qpay" ? "Автоматаар баталгаажиж" : "Баталлаа,"} боловсруулж эхэллээ: ${NAMES[f.product]} (${psid})`); }

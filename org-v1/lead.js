@@ -117,6 +117,13 @@ async function classify(text) {
 
 // Итгүүлэх (Opus) чат: LEAD_SALES=1 үед л ангилагч «sales=1» өгнө. Үгүй бол зөвхөн ятгах рийлийн (ref=yatgah) хүмүүст.
 const SALES_ON = () => process.env.LEAD_SALES === "1";
+// Итгүүлэх ботыг тодорхой хугацаанд БҮХ шинэ/цэс сонгож буй хүнд асаах: LEAD_SALES_WINDOW="2026-11-16T20:00+08:00/2026-11-16T24:00+08:00" (олон бол ; -ээр)
+function salesWindow(now = Date.now()) {
+  return String(process.env.LEAD_SALES_WINDOW || "").split(";").map((w) => w.trim()).filter(Boolean).some((w) => {
+    const [a, b] = w.split("/").map((x) => Date.parse(String(x).trim().replace("T24:00", "T23:59:59")));
+    return a && b && now >= a && now <= b;
+  });
+}
 // «Төсөл бичүүлэх» товч: BIZ_PROJECT — Make-ийн ердийн бизнес төслийн урсгал (эсвэл SALES_ON үед итгүүлэх бот) хүлээж авна
 const SVC_BTN = [["📄 Төсөл бичүүлэх", "BIZ_PROJECT"], ["💡 Зүгээр мэдээлэл", "LEAD_INFO"]];
 // Рийлийн түлхүүр үгэнд: тухайн бизнесийн товч мэдээлэл (тоо, үнэ зохиохгүй) + төслийн товч. Түлхүүр бүрээр нэг удаа үүсгээд хадгална.
@@ -196,7 +203,7 @@ async function handle({ psid, text, payload, state, sales_ref, att }) {
   if (psid === ADMIN() && /^түлхүүр/i.test(text)) { const r = await kwAdmin(text); if (r) { await F()._send(psid, r); return { ...base, handled: "1" }; } }
   const L = await getL(psid);
   const yat = String(sales_ref || "") === "yatgah";
-  const out = (handled) => ({ sales: (SALES_ON() && L.tag === "intent") || yat ? "1" : "0", handled: handled ? "1" : "0", tag: L.tag || "" });
+  const out = (handled) => ({ sales: (SALES_ON() && L.tag === "intent") || yat || (fresh && salesWindow()) ? "1" : "0", handled: handled ? "1" : "0", tag: L.tag || "" });
   const fresh = !state || state === "selecting_type";
   if (!state) await count("new", psid);
 
@@ -288,4 +295,5 @@ module.exports.count = count;
 module.exports.classify = classify;
 module.exports.reportText = reportText;
 module.exports.enabled = enabled;
+module.exports._salesWindow = salesWindow;
 module.exports._weekKey = weekKey;
