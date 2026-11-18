@@ -15,4 +15,14 @@ async function research(A, Y) {
   const [macro, law, sector] = (await Promise.all(["macro", "law", "sector"].map(one))).map(fix);
   return { macro, law, sector };
 }
-module.exports = { research };
+// Тайланд (хэлтэс, захирал): тайлант хугацаанд нөлөөлсөн хууль, Засгийн газрын шийдвэр, макро ба салбарын өөрчлөлт. Нэг дуудлага, амжилтгүй бол [].
+const ENV_SYS = SYSTEM.replace("8-18 баримт.", "6-14 баримт. topic нь gov|law|macro|sector. Тайлант хугацаанд гарсан эсвэл хэрэгжиж эхэлсэн зүйлийг л ав.");
+async function researchReport(A, period, P) {
+  const who = P === "report_dir" ? (A.industry || A.org_name || "") : [A.unit_name || A.reporter_title, A.industry || A.org_name].filter(Boolean).join(", ");
+  const user = `Монгол Улс. Тайлант хугацаа: ${period}. Байгууллага/нэгж: ${who}${A.org_type ? " (" + A.org_type + ")" : ""}. Хайх: (1) энэ хугацаанд гарсан, энэ ${P === "report_dir" ? "байгууллага, салбарт" : "нэгжийн ажилд"} нөлөөлөх Засгийн газрын тогтоол, шийдвэр, яамны журам; (2) батлагдсан эсвэл өөрчлөгдсөн хууль (нэр, хэрэгжиж эхэлсэн огноо); (3) ${P === "report_dir" ? "инфляци, бодлогын хүү, ханш, хөдөлмөрийн хөлсний доод хэмжээний өөрчлөлт" : "хөдөлмөрийн хөлсний доод хэмжээ, нийгмийн даатгалын өөрчлөлт"}; (4) салбарын гол өөрчлөлт. Нэр, огноо, эх сурвалжийг заавал.`;
+  try {
+    const f = (await callJSON({ system: ENV_SYS, user, webSearch: true, maxSearches: 6, maxTokens: 12000, model: WRITER })).facts || [];
+    return f.filter((x) => x && x.fact && String(x.source || "").trim() && !/web_?search|хайлтын үр дүн/i.test(String(x.source)));
+  } catch (e) { if (/credit balance/i.test(e.message || "")) throw e; console.warn(`[org-research] env: ${e.message}`); return []; }
+}
+module.exports = { research, researchReport };

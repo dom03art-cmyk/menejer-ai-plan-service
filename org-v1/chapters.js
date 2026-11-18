@@ -47,6 +47,7 @@ const styleFor = (p, outline = OUTLINES[p]) => { const k = outline === OUTLINES[
 
 function researchFor(item, r) {
   if (!r) return [];
+  if (r.env) return item.env ? r.env : [];
   if (r.general) return item.research || item.group === "summary" ? r.general : [];
   const all = [...(r.macro || []), ...(r.law || []), ...(r.sector || [])];
   if (item.group === "3" || item.group === "summary") return all;

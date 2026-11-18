@@ -4,7 +4,7 @@ const { extractRaw } = require("./rawtext");
 const { planIntake, reportIntake } = require("./intake");
 const plancalc = require("./plancalc"), planfin = require("./planfin"), planxlsx = require("./planxlsx");
 const kpicalc = require("./kpicalc"), kpifin = require("./kpifin"), kpixlsx = require("./kpixlsx"), kpiplanxlsx = require("./kpiplanxlsx");
-const { research } = require("./research");
+const { research, researchReport } = require("./research");
 const { writeAll, writeSome, writeAllMock } = require("./chapters");
 const REV = require("./revise");
 const revRejected = (code, msg) => { const e = new Error(msg); e.status = "revision_rejected"; e.code = code; return e; };
@@ -91,7 +91,7 @@ async function runOrg(job, log = console.log) {
     if (isSub && P === "plan_dept") per = PER.make(pin, job.periodYear || PER.planYear(pin));
     else if (isSub) per = PER.make(pin, Number(m.year) || PER.reportYear(pin));
   }
-  const outline = per ? PER.adaptOutline(OUTLINES[P], per) : OUTLINES[P];
+  let outline = per ? PER.adaptOutline(OUTLINES[P], per) : OUTLINES[P];
   if (per) log(`[org ${job.id}] хугацаа: ${per.full}`);
   if (snap) {
     step("2/8 засварын төлөвлөгөө");
@@ -116,7 +116,12 @@ async function runOrg(job, log = console.log) {
   step("3/8 судалгаа");
   let rs = snap ? snap.rs || null : null;
   if (plan && !snap && !MOCK()) { try { rs = await research(A, res.year || cfg.year); } catch (e) { if (/credit balance/i.test(e.message || "")) throw e; log(`[org ${job.id}] судалгаа амжилтгүй: ${e.message}`); } }
-  fin.sources = [...new Set([...(rs ? [...rs.macro, ...rs.law, ...rs.sector] : [])].map((x) => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
+  const envOn = !plan && (P === "report_dept" || P === "report_dir") && process.env.ORG_REPORT_RESEARCH !== "0";
+  if (envOn && !snap && !MOCK()) { rs = { env: await researchReport(A, res.period || per?.full || String(res.year || ""), P) }; log(`[org ${job.id}] гадаад орчны баримт: ${rs.env.length}`); }
+  if (MOCK() && envOn && job.mockEnv) rs = { env: job.mockEnv };
+  if (!(rs && rs.env && rs.env.length)) outline = outline.filter((o) => !o.env);
+  else (fin.blocks = fin.blocks || {}).env_sources = [{ type: "p", text: "**Эх сурвалж:**" }, { type: "bullets", items: [...new Set(rs.env.map((x) => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 20) }];
+  fin.sources = [...new Set([...(rs && !rs.env ? [...rs.macro, ...rs.law, ...rs.sector] : [])].map((x) => `${x.source}${x.date ? ", " + x.date : ""}`))].slice(0, 40);
   fin.sources.push(...raw.files.filter((f) => f.ok).map((f) => `Байгууллагын материал: ${f.name}`), "Захиалагчийн өгсөн мэдээлэл", "Төсвийн тооцоо (кодоор тооцсон)");
 
   step("4/8 бүлгүүдийг бичиж байна");
