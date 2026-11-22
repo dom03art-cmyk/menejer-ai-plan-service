@@ -14,6 +14,7 @@ const router = express.Router();
 const GRAPH = "https://graph.facebook.com/v21.0/me/messages";
 const MKT_PRICE = Number(process.env.MKT_PRICE || 149900);
 const ADMIN = () => process.env.ADMIN_PSID;
+const RC = () => require("./receipt");
 function auth(req, res, next) { if (req.get("x-api-key") !== process.env.API_KEY) return res.status(401).json({ error: "unauthorized" }); next(); }
 
 // ---- төлөв хадгалах (Redis эсвэл санах ой), 30 хоног ----
@@ -423,6 +424,7 @@ async function handle({ psid, text, payload, attachments }) {
       if (payload === "FLOW_QPCHECK" && f.qpay) return qpCheck(psid, f);
       if (payload === "FLOW_MORE" && f.url) { f.s = "uploading"; await setF(psid, f); await send(psid, `Нэмэлт материалаа энэ холбоосоор илгээгээд «Дууслаа» дарна уу, үнэ дахин бодогдоно:\n${f.url}`); return "ext"; }
       const img = atts.find(isImage);
+      if (img && !(await RC().isReceipt(img.payload && img.payload.url))) { await send(psid, RC().NOT_MSG); return "ext"; }
       if (img) {
         f.s = "payment_review"; f.receipt = img.payload && img.payload.url; await setF(psid, f);
         await send(psid, "Баярлалаа! Төлбөрийн баримтыг хүлээн авлаа ✅ Шалгаад баталгаажмагц боловсруулж эхэлнэ.");
@@ -615,6 +617,15 @@ router.post("/flow/message", express.json({ limit: "1mb" }), auth, async (req, r
 });
 router.post("/flow/admin", express.json(), auth, async (req, res) => {
   try { res.json(await admin((req.body || {}).payload)); } catch (e) { console.error("[flow] admin", e); res.json({ ok: false, error: e.message }); }
+});
+// Make (бизнес төслийн урсгал): төлбөр хүлээж байхад ирсэн зураг баримт мөн эсэх. Биш бол захиалагчид хэлээд receipt:"0".
+router.post("/flow/receipt-check", express.json(), auth, async (req, res) => {
+  const { psid, url } = req.body || {};
+  try {
+    const ok = await RC().isReceipt(url);
+    if (!ok && psid) await send(String(psid), RC().NOT_MSG);
+    res.json({ receipt: ok ? "1" : "0" });
+  } catch (e) { console.error("[flow] receipt-check", e.message); res.json({ receipt: "1" }); }
 });
 router.get("/flow/state/:psid", auth, async (req, res) => res.json(await getF(req.params.psid)));
 
