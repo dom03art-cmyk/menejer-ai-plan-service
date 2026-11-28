@@ -27,8 +27,47 @@ function describe(c) {
   return `${what} (${where}), ${day(c.expires)} хүртэл${c.maxUses ? `, ${c.maxUses} хүн хүртэл` : ""}`;
 }
 
+// ---- клипер (контент бүтээгч) ----
+// «код клипер БОЛД»            — БОЛД нэртэй код: худалдан авагчид CLIPPER_PCT% (анхдагч 20%), 1 жил, хүний тоо хязгааргүй;
+//                                 төлбөр бүрэн орсон борлуулалт бүрт клиперт CLIPPER_REWARD (анхдагч 10 000₮) урамшуулал тооцно
+// «код клипер БОЛД 15% 90 хоног» — хувь, хугацааг өөрчилж болно
+// «код клипер тайлан»          — клипер бүрийн борлуулалт, төлөх урамшуулал
+// «код клипер төлсөн БОЛД»     — БОЛД-д урамшууллыг шилжүүлсэн гэж тэмдэглэнэ (үлдэгдэл 0 болно)
+const REWARD = () => Number(process.env.CLIPPER_REWARD || 10000);
+const CPCT = () => Number(process.env.CLIPPER_PCT || 20);
+function clipperCommand(t) {
+  const m = t.match(/^код\s+клипер(?:\s+(.*))?$/i); if (!m) return null;
+  const rest = String(m[1] || "").trim(), db = load();
+  if (!rest || /^тайлан$/i.test(rest)) {
+    const list = Object.values(db.codes).filter((c) => c.clipper).map((c) => {
+      const n = (c.clipper.sales || []).length, paid = c.clipper.paidCount || 0, owe = (n - paid) * c.clipper.reward;
+      return `• ${c.name}${live(c) ? "" : " (зогссон)"}: ${n} борлуулалт, төлөх ${money(owe)}${paid ? ` (өмнө ${paid}-ийг төлсөн)` : ""}`;
+    });
+    return list.length ? `🎬 Клиперүүд:\n${list.join("\n")}\n\nТөлсний дараа «код клипер төлсөн НЭР» гэж бичнэ үү.` : "Клипер алга. «код клипер НЭР» гэж үүсгэнэ.";
+  }
+  let x = rest.match(/^төлсөн\s+(\S+)$/i);
+  if (x) {
+    const c = db.codes[norm(x[1])]; if (!c || !c.clipper) return `«${norm(x[1])}» клипер олдсонгүй.`;
+    const n = (c.clipper.sales || []).length, owe = (n - (c.clipper.paidCount || 0)) * c.clipper.reward;
+    c.clipper.paidCount = n; c.clipper.payments = [...(c.clipper.payments || []), { at: Date.now(), amount: owe }]; save(db);
+    return `✅ ${c.name}: ${money(owe)} төлсөн гэж тэмдэглэлээ. Үлдэгдэл 0.`;
+  }
+  const words = rest.split(/\s+/), name = norm(words[0]);
+  if (!name || name.length < 3) return "Клиперийн кодын нэр 3-аас дээш тэмдэгт байна. Жишээ: «код клипер БОЛД».";
+  if (db.codes[name] && live(db.codes[name])) return `«${name}» нэртэй идэвхтэй код байна. Өөр нэр сонгоно уу.`;
+  const opts = " " + words.slice(1).join(" ") + " ";
+  const pct = opts.match(/\s(\d+(?:[.,]\d+)?)\s*%\s/), days = opts.match(/\s(\d+)\s*хоног\s/i);
+  const value = pct ? Number(pct[1].replace(",", ".")) : CPCT();
+  if (!(value > 0 && value < 100)) return "Хувь 1–99 хооронд байна.";
+  db.codes[name] = { active: true, uses: 0, usedBy: {}, createdAt: Date.now(), name, type: "pct", value, products: null, maxUses: 0,
+    expires: Date.now() + (days ? Number(days[1]) : 365) * DAY, clipper: { reward: REWARD(), sales: [], paidCount: 0 } };
+  save(db);
+  return `✅ Клипер код үүслээ: ${name}\n${describe(db.codes[name])}. Борлуулалт бүрт клиперт ${money(REWARD())}.\n\nКлипер үзэгчиддээ: «Менежер AI пэйж рүү чатаар "код ${name}" гэж бичээд ${value}% хөнгөлөлт аваарай» гэж хэлнэ.\nТайлан: «код клипер тайлан».`;
+}
+
 // ---- админы тушаал ----
 function adminCommand(text) {
+  const clip = clipperCommand(String(text || "").trim()); if (clip) return clip;
   const db = load(), t = String(text || "").trim();
   if (/^кодууд$/i.test(t)) {
     const list = Object.values(db.codes).filter((c) => live(c)).map((c) => `• ${c.name}: ${describe(c)} — ${c.uses || 0} хүн ашигласан`);
@@ -94,9 +133,14 @@ function apply(psid, kind, meta, amount) {
 }
 function consume(psid, code) {
   const db = load(), c = db.codes[code]; if (!c) return;
-  c.usedBy = c.usedBy || {}; if (!c.usedBy[psid]) { c.usedBy[psid] = Date.now(); c.uses = (c.uses || 0) + 1; }
+  let sale = false;
+  c.usedBy = c.usedBy || {}; if (!c.usedBy[psid]) { c.usedBy[psid] = Date.now(); c.uses = (c.uses || 0) + 1; if (c.clipper) { (c.clipper.sales = c.clipper.sales || []).push({ psid: String(psid), at: Date.now() }); sale = true; } }
   if (db.redeem[psid] && db.redeem[psid].code === code) delete db.redeem[psid];
   save(db);
+  if (sale && process.env.ADMIN_PSID) {
+    const n = c.clipper.sales.length, owe = (n - (c.clipper.paidCount || 0)) * c.clipper.reward;
+    try { Promise.resolve(require("./flow")._send(process.env.ADMIN_PSID, `🎬 Клипер «${c.name}»-ээр борлуулалт орлоо (нийт ${n}). Клиперт төлөх үлдэгдэл: ${money(owe)}.`)).catch(() => { }); } catch (_) { }
+  }
 }
 const isCodeText = (t) => /^\s*(?:код|kod)(?:ууд|\s|:|$)/i.test(String(t || ""));
 module.exports = { adminCommand, redeem, apply, consume, isAdmin, isCodeText, _file: FILE };
